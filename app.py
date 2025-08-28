@@ -10,12 +10,6 @@ import streamlit as st
 st.set_page_config(page_title="Consumer Loans – 60M Expected CF", layout="wide")
 st.title("German Consumer Loans — 60-Month Expected Cashflows")
 
-# ---- (Optional) simple password gate ----
-# Uncomment to enable password protection (add APP_PASSWORD in Streamlit Secrets)
-# pwd = st.text_input("Password", type="password")
-# if pwd != st.secrets.get("APP_PASSWORD"):
-#     st.stop()
-
 # ---------- Helpers ----------
 def annuity_payment(balance: float, r_m: float, n: int) -> float:
     """Compute annuity payment when monthly rate or term might be edge-case."""
@@ -31,7 +25,7 @@ def cpr_to_smm(cpr: float) -> float:
 
 # ---------- Sidebar: data & assumptions ----------
 st.sidebar.header("Data source")
-file = st.sidebar.file_uploader("Upload Excel/CSV (expects sheet 'loan_tape')", type=["xlsx", "csv"])
+file = st.sidebar.file_uploader("Upload file", type=["xlsx", "csv"])
 use_sample = st.sidebar.checkbox("Use bundled sample file: 'loanslite for app.xlsx'", value=True)
 SAMPLE_PATH = "loanslite for app.xlsx"
 
@@ -273,3 +267,4 @@ st.json({
     "months": months,
     "scenario": scenario,
 })
+
