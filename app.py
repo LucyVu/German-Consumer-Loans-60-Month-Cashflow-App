@@ -22,17 +22,14 @@ def annuity_payment(balance: float, r_m: float, n: int) -> float:
         return balance / n
     return balance * (r_m / (1 - (1 + r_m) ** (-n)))
 
-
 def cpr_to_smm(cpr: float) -> float:
     """Convert CPR (annual) to SMM (monthly)."""
     return 1 - (1 - cpr) ** (1/12)
-
 
 def annual_pd_to_monthly(pd_annual: float) -> float:
     """Convert annual PD (0..1) to a monthly default probability."""
     pd_annual = max(0.0, min(pd_annual, 1.0))
     return 1 - (1 - pd_annual) ** (1/12)
-
 
 def read_loan_tape(path_or_buffer, sheet_name: str = "loan_tape") -> pd.DataFrame:
     """
@@ -62,7 +59,6 @@ def read_loan_tape(path_or_buffer, sheet_name: str = "loan_tape") -> pd.DataFram
     except ValueError as e:
         st.error(f"{e}\nMake sure your Excel has a sheet named '{sheet_name}'.")
         st.stop()
-
 
 # ---------- Sidebar: data & assumptions ----------
 st.sidebar.header("Data source")
@@ -108,7 +104,6 @@ SMM_eff = SMM_base * CPR_multiplier
 fee_m = (servicing_bps / 10000.0) / 12.0
 d_m = disc_rate / 12.0
 
-
 # ---------- Load data ----------
 loans = None
 
@@ -131,62 +126,66 @@ if loans is None:
 
 # Required schema
 required_cols = [
-    "loan_id",
-    "opening_balance",
-    "interest_rate (annual)",
-    "remaining_term",
-    "monthly_payment",
-    "pd",
-    "lgd",
+    "loan_id", "opening_balance", "interest_rate (annual)",
+    "remaining_term", "monthly_payment", "pd", "lgd",
 ]
 missing = [c for c in required_cols if c not in loans.columns]
 if missing:
     st.error(f"Missing required columns: {missing}")
     st.stop()
 
-
 # ---------- Theme & helpers ----------
-PRIMARY = "#2457F5"   # cobalt
-ACCENT  = "#12B886"   # teal
-DANGER  = "#EF4444"
+# Core palette: white/black/gray + two blues
+PRIMARY = "#2457F5"      # cobalt blue
+PRIMARY_L = "#60A5FA"    # light blue
+BLACK   = "#111827"
+GRAY_D  = "#6B7280"
+GRAY_M  = "#9CA3AF"
+BORDER  = "#E5E7EB"
 
-st.markdown("""
+st.markdown(f"""
 <style>
+:root {{
+  --primary: {PRIMARY};
+  --primary-light: {PRIMARY_L};
+  --text: {BLACK};
+  --muted: {GRAY_D};
+  --border: {BORDER};
+}}
 /* App + headings */
-.stApp { background:#ffffff; color:#111827; }
-h1,h2,h3,h4 { color:#111827; }
+.stApp {{ background:#ffffff; color:var(--text); }}
+h1,h2,h3,h4 {{ color:var(--text); }}
 
 /* Sidebar */
-div[data-testid="stSidebar"]{
-  background:#f8fafc; color:#111827; border-right:1px solid #e5e7eb;
-}
+div[data-testid="stSidebar"]{{
+  background:#f8fafc; color:var(--text); border-right:1px solid var(--border);
+}}
 
 /* Metric cards */
-div[data-testid="stMetric"] > div {
-  background:#ffffff; border:1px solid #e5e7eb; padding:14px 18px; border-radius:14px;
-}
-div[data-testid="stMetricLabel"] { color:#6b7280; }
-div[data-testid="stMetricValue"] { color:#111827; font-weight:700; }
+div[data-testid="stMetric"] > div {{
+  background:#ffffff; border:1px solid var(--border); padding:14px 18px; border-radius:14px;
+}}
+div[data-testid="stMetricLabel"] {{ color:var(--muted); }}
+div[data-testid="stMetricValue"] {{ color:var(--primary); font-weight:700; }}
 
 /* Expander */
-summary { background:#ffffff; border:1px solid #e5e7eb; padding:10px 12px; border-radius:10px; }
-details[open] > summary { border-bottom:1px solid #e5e7eb; }
+summary {{ background:#ffffff; border:1px solid var(--border); padding:10px 12px; border-radius:10px; }}
+details[open] > summary {{ border-bottom:1px solid var(--border); }}
 
 /* Tables */
-thead tr th { background:#f9fafb !important; color:#111827 !important; }
+thead tr th {{ background:#f9fafb !important; color:var(--text) !important; }}
 
 /* Scenario badge */
-.badge {
+.badge {{
   display:inline-block; padding:6px 10px; border-radius:999px;
   background:#e8efff; border:1px solid #c7d2fe; color:#1e3a8a;
   font-size:0.85rem; font-weight:600; letter-spacing:.2px;
-}
+}}
 </style>
 """, unsafe_allow_html=True)
 
 # Scenario badge under the title
 st.markdown(f"<span class='badge'>Scenario: {scenario}</span>", unsafe_allow_html=True)
-
 
 def fmt_compact_money(x: float, symbol: str = "€") -> str:
     sign = "-" if x < 0 else ""
@@ -197,7 +196,6 @@ def fmt_compact_money(x: float, symbol: str = "€") -> str:
     else:         val = f"{n:,.0f}"
     return f"{sign}{symbol}{val}"
 
-
 def number_cols_config(df: pd.DataFrame, decimals: int = 0):
     """Build a column_config dict to format all numeric cols."""
     cfg = {}
@@ -206,21 +204,21 @@ def number_cols_config(df: pd.DataFrame, decimals: int = 0):
             cfg[c] = st.column_config.NumberColumn(c, format=f"%.{decimals}f")
     return cfg
 
-
 def apply_fig_theme(fig: go.Figure) -> go.Figure:
+    # Consistent colors + subtle gray grid
     fig.update_layout(
         template="plotly_white",
         paper_bgcolor="white",
         plot_bgcolor="white",
-        font=dict(color="#111827"),
+        font=dict(color=BLACK),
+        colorway=[PRIMARY, PRIMARY_L, BLACK, GRAY_D, GRAY_M],
+        xaxis=dict(gridcolor=BORDER),
+        yaxis=dict(gridcolor=BORDER),
     )
     return fig
 
-
 def padded_range(pos_values, neg_values, pad=0.45):
-    """
-    Symmetric y-range with generous head/foot room so outside labels don't clip.
-    """
+    """Symmetric y-range with generous head/foot room so outside labels don't clip."""
     max_pos = max([0.0] + [float(v) for v in pos_values if np.isfinite(v)])
     max_neg = max([0.0] + [abs(float(v)) for v in neg_values if np.isfinite(v)])
     top = (1.0 + pad) * max_pos
@@ -228,7 +226,6 @@ def padded_range(pos_values, neg_values, pad=0.45):
     if top == 0 and bottom == 0:
         top = 1.0
     return [bottom, top]
-
 
 # ---------- Core engine ----------
 def project_cashflows(
@@ -273,30 +270,38 @@ def project_cashflows(
                              recs.get(t, 0.0), 0.0, 0.0, cash, pv, 0.0])
                 continue
 
-            interest = bal * r_m                                  # 1) Interest
-            sched_prin = max(0.0, min(bal, pmt - interest))        # 2) Scheduled principal
-            prepay_base = max(0.0, bal - sched_prin)               # 3) Prepayment
+            # 1) Interest
+            interest = bal * r_m
+            # 2) Scheduled principal
+            sched_prin = max(0.0, min(bal, pmt - interest))
+            # 3) Prepayment
+            prepay_base = max(0.0, bal - sched_prin)
             prepay = prepay_base * SMM_eff
-            default_base = max(0.0, prepay_base - prepay)          # 4) Default on survivors
+            # 4) Default on survivors after prepay
+            default_base = max(0.0, prepay_base - prepay)
             def_prin = default_base * pd_m
-            loss = def_prin * lgd                                   # 5) Loss & Recovery
+            # 5) Loss & Recovery (recovery comes later)
+            loss = def_prin * lgd
             rec_amount = def_prin * (1 - lgd)
             lag_month = int(recovery_lag_m)
             recs[t + lag_month] = recs.get(t + lag_month, 0.0) + rec_amount
-            fees = bal * fee_m                                      # 6) Fees on beginning balance
-            end_bal = max(0.0, bal - sched_prin - prepay - def_prin)# 7) End balance
-            cash = interest + sched_prin + prepay + recs.get(t, 0.0) - fees  # 8) Cashflow
+            # 6) Fees on beginning balance
+            fees = bal * fee_m
+            # 7) End balance
+            end_bal = max(0.0, bal - sched_prin - prepay - def_prin)
+            # 8) Cashflow (this month) & PV
+            cash = interest + sched_prin + prepay + recs.get(t, 0.0) - fees
             pv = cash / ((1 + d_m) ** t)
 
             rows.append([t, loan_id, bal, interest, sched_prin, prepay, def_prin,
                          recs.get(t, 0.0), fees, end_bal, cash, pv, loss])
+
             bal = end_bal
 
     return pd.DataFrame(rows, columns=[
         "t", "loan_id", "Beg_Bal", "Interest", "SchedPrin", "Prepay", "DefaultPrin",
         "Recoveries", "Fees", "End_Bal", "Cashflow", "PV", "Loss"
     ])
-
 
 @st.cache_data(show_spinner=False)
 def project_cashflows_cached(
@@ -312,7 +317,6 @@ def project_cashflows_cached(
 ) -> pd.DataFrame:
     df = pd.read_json(loans_df_json)
     return project_cashflows(df, horizon_months, pd_unit, PD_multiplier, LGD_shift, SMM_eff, fee_m, d_m, recovery_lag_m)
-
 
 # Run engine (cached)
 cf = project_cashflows_cached(
@@ -388,7 +392,7 @@ EndBal_str  = fmt_compact_money(EndBal_last)
 WAL_str     = f"{WAL_years:.2f}"
 Pool_str    = f"{PoolLife_years:.2f}"
 
-# ---------- Drawdown helpers (to reuse in two tabs) ----------
+# ---------- Drawdown helpers ----------
 def scenario_defaults_for_drawdown(scenario: str, opening_pool: float, months: int):
     reinv = min(18, int(months))
     rate = 0.060
@@ -402,7 +406,6 @@ def scenario_defaults_for_drawdown(scenario: str, opening_pool: float, months: i
         rate = min(rate, 0.050)
         reinv = min(reinv, 24)
     return reinv, rate, limit
-
 
 def compute_drawdowns(port_df: pd.DataFrame, reinv_months: int, fac_rate_annual: float, fac_limit: float):
     required_purchases = port_df["Beg_Bal"] - port_df["End_Bal"]
@@ -445,7 +448,6 @@ def compute_drawdowns(port_df: pd.DataFrame, reinv_months: int, fac_rate_annual:
         fac_beg = fac_end
 
     return pd.DataFrame(rows)
-
 
 # ---------- TOP-LEVEL NAV ----------
 st.caption("Navigate: **Overview** → trends in **Portfolio Cashflows** → one-month **Waterfalls** → funding in **Drawdowns** → **Tables & Export**.")
@@ -493,11 +495,7 @@ with tab_cash:
     bal_fig.add_trace(go.Scatter(x=port["t"], y=port["End_Bal"], mode="lines", name="Ending Balance"))
     bal_fig.add_trace(go.Scatter(x=port["t"], y=port["Loss"].cumsum(), mode="lines", name="Cumulative Loss"))
     bal_fig.add_trace(go.Scatter(x=port["t"], y=port["Recoveries"].cumsum(), mode="lines", name="Cumulative Recoveries"))
-    bal_fig.update_layout(
-    xaxis_title="Month",
-    yaxis_title="Amount",
-    title="Ending Balance, Cum Loss, Cum Recoveries"
-)
+    bal_fig.update_layout(xaxis_title="Month", yaxis_title="Amount", title="Ending Balance, Cum Loss, Cum Recoveries")
     st.plotly_chart(apply_fig_theme(bal_fig), use_container_width=True)
 
     st.markdown("### Rate trends")
@@ -568,6 +566,9 @@ with tab_wf:
                       f"{row['SchedPrin']:,.0f}", f"{row['Prepay']:,.0f}",
                       f"{row['Recoveries']:,.0f}", f"{row['Cashflow']:,.0f}"],
                 textposition="outside",
+                increasing={"marker": {"color": PRIMARY}},
+                decreasing={"marker": {"color": GRAY_M}},
+                totals={"marker": {"color": PRIMARY_L}},
             ))
             # padded y-range so labels don't clip + more height/margins
             pos_vals_cf = [row["Interest"], row["SchedPrin"], row["Prepay"], row["Recoveries"], max(row["Cashflow"], 0)]
@@ -596,6 +597,9 @@ with tab_wf:
                 text=[f"{row['Beg_Bal']:,.0f}", f"{-row['SchedPrin']:,.0f}",
                       f"{-row['Prepay']:,.0f}", f"{-row['DefaultPrin']:,.0f}", f"{row['End_Bal']:,.0f}"],
                 textposition="outside",
+                increasing={"marker": {"color": PRIMARY}},   # only used for absolute bar start
+                decreasing={"marker": {"color": GRAY_M}},
+                totals={"marker": {"color": PRIMARY_L}},
             ))
             pos_vals_pr = [row["Beg_Bal"], row["End_Bal"]]
             neg_vals_pr = [row["SchedPrin"], row["Prepay"], row["DefaultPrin"]]
@@ -678,8 +682,7 @@ with tab_draw:
                           height=420, margin=dict(t=60, b=60, l=60, r=40))
         st.plotly_chart(apply_fig_theme(cov), use_container_width=True)
 
-    # NOTE: The table is now shown in the Tables & Export tab (below).
-
+    # NOTE: The table is now shown in the Tables & Export tab.
 
 # =========================
 # Tab 5: TABLES & EXPORT
@@ -687,27 +690,24 @@ with tab_draw:
 with tab_tables:
     with st.expander("Portfolio cashflows (monthly)", expanded=False):
         st.dataframe(
-            port,
-            use_container_width=True,
+            port, use_container_width=True,
             column_config=number_cols_config(port, decimals=0)
         )
 
     with st.expander("Waterfall-ready ledger", expanded=False):
         st.dataframe(
-            ledger,
-            use_container_width=True,
+            ledger, use_container_width=True,
             column_config=number_cols_config(ledger, decimals=0)
         )
 
     with st.expander("Loan-level cashflows", expanded=False):
         st.dataframe(
-            cf,
-            use_container_width=True,
+            cf, use_container_width=True,
             column_config=number_cols_config(cf, decimals=0)
         )
 
     with st.expander("Drawdown schedule", expanded=False):
-        # Use schedule from Drawdowns tab if available; otherwise use scenario-linked defaults
+        # Use schedule from Drawdowns tab if available; otherwise compute defaults
         if "drawdf" in st.session_state:
             drawdf_tbl = st.session_state["drawdf"]
         else:
@@ -718,8 +718,7 @@ with tab_tables:
             drawdf_tbl = compute_drawdowns(port, reinv_default, rate_default, limit_default)
 
         st.dataframe(
-            drawdf_tbl,
-            use_container_width=True,
+            drawdf_tbl, use_container_width=True,
             column_config=number_cols_config(drawdf_tbl, decimals=0)
         )
         st.download_button(
@@ -729,21 +728,8 @@ with tab_tables:
             mime="text/csv",
         )
 
-    # One-click Excel + CSVs
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
-        port.to_excel(xw, index=False, sheet_name="portfolio")
-        ledger.to_excel(xw, index=False, sheet_name="ledger")
-        cf.to_excel(xw, index=False, sheet_name="loan_level")
-        if "drawdf" in st.session_state:
-            st.session_state["drawdf"].to_excel(xw, index=False, sheet_name="drawdowns")
-    st.download_button(
-        "⬇️ Download XLSX (portfolio, ledger, loan-level" + (", drawdowns" if "drawdf" in st.session_state else "") + ")",
-        data=buf.getvalue(),
-        file_name="cashflows.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-
+    # ---- Removed the big top XLSX download per your request ----
+    # Keep only the three CSV buttons below:
     c_dl1, c_dl2, c_dl3 = st.columns(3)
     with c_dl1:
         st.download_button("CSV — portfolio", port.to_csv(index=False).encode("utf-8"),
