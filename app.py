@@ -377,24 +377,29 @@ st.download_button(
 )
 
 # ---------- Assumption log ----------
-st.subheader("Assumption log")
-st.json({
-    "pd_unit": pd_unit,
-    "CPR_annual": CPR_annual,
-    "SMM_base": SMM_base,
-    "CPR_multiplier": CPR_multiplier,
-    "SMM_eff": SMM_eff,
-    "servicing_bps": servicing_bps,
-    "fee_monthly": fee_m,
-    "discount_annual": disc_rate,
-    "discount_monthly": d_m,
-    "recovery_lag_m": recovery_lag_m,
-    "PD_multiplier": PD_multiplier,
-    "LGD_shift": LGD_shift,
-    "months": months,
-    "scenario": scenario,
-    "include_recoveries_in_wal": include_recoveries_in_wal,
-})
+# --- put this near the top of the page (e.g., after other sidebar inputs)
+show_log = st.sidebar.checkbox("Show assumption log (debug)", value=False)
+
+# ... later, replace your current Assumption log block with:
+if show_log:
+    st.subheader("Assumption log")
+    st.json({
+        "pd_unit": pd_unit,
+        "CPR_annual": CPR_annual,
+        "SMM_base": SMM_base,
+        "CPR_multiplier": CPR_multiplier,
+        "SMM_eff": SMM_eff,
+        "servicing_bps": servicing_bps,
+        "fee_monthly": fee_m,
+        "discount_annual": disc_rate,
+        "discount_monthly": d_m,
+        "recovery_lag_m": recovery_lag_m,
+        "PD_multiplier": PD_multiplier,
+        "LGD_shift": LGD_shift,
+        "months": months,
+        "scenario": scenario,
+        "include_recoveries_in_wal": include_recoveries_in_wal,
+    })
 
 
 
