@@ -110,7 +110,6 @@ loans = None
 if file is not None:
     # Uploaded Excel/CSV
     loans = read_loan_tape(file, sheet_name=sheet_name)
-
 elif use_sample:
     # Use bundled sample next to app.py
     if os.path.exists(SAMPLE_PATH):
@@ -142,8 +141,78 @@ if missing:
     st.error(f"Missing required columns: {missing}")
     st.stop()
 
-# ---------- Core engine ----------
-def project_cashflows(loans_df: pd.DataFrame, horizon_months: int) -> pd.DataFrame:
+# ---------- Theme & helpers ----------
+PRIMARY = "#2457F5"   # cobalt
+ACCENT  = "#12B886"   # teal
+DANGER  = "#EF4444"
+
+st.markdown("""
+<style>
+/* App + headings */
+.stApp { background:#ffffff; color:#111827; }
+h1,h2,h3,h4 { color:#111827; }
+
+/* Sidebar */
+div[data-testid="stSidebar"]{
+  background:#f8fafc; color:#111827; border-right:1px solid #e5e7eb;
+}
+
+/* Metric cards */
+div[data-testid="stMetric"] > div {
+  background:#ffffff; border:1px solid #e5e7eb; padding:14px 18px; border-radius:14px;
+}
+div[data-testid="stMetricLabel"] { color:#6b7280; }
+div[data-testid="stMetricValue"] { color:#111827; font-weight:700; }
+
+/* Expander */
+summary { background:#ffffff; border:1px solid #e5e7eb; padding:10px 12px; border-radius:10px; }
+details[open] > summary { border-bottom:1px solid #e5e7eb; }
+
+/* Tables */
+thead tr th { background:#f9fafb !important; color:#111827 !important; }
+
+/* Scenario badge */
+.badge {
+  display:inline-block; padding:6px 10px; border-radius:999px;
+  background:#e8efff; border:1px solid #c7d2fe; color:#1e3a8a;
+  font-size:0.85rem; font-weight:600; letter-spacing:.2px;
+}
+</style>
+""", unsafe_allow_html=True)
+
+# Scenario badge under the title
+st.markdown(f"<span class='badge'>Scenario: {scenario}</span>", unsafe_allow_html=True)
+
+def fmt_compact_money(x: float, symbol: str = "€") -> str:
+    sign = "-" if x < 0 else ""
+    n = abs(x)
+    if n >= 1e9:  val = f"{n/1e9:.2f}bn"
+    elif n >= 1e6: val = f"{n/1e6:.2f}m"
+    elif n >= 1e3: val = f"{n/1e3:.0f}k"
+    else:         val = f"{n:,.0f}"
+    return f"{sign}{symbol}{val}"
+
+def apply_fig_theme(fig: go.Figure) -> go.Figure:
+    fig.update_layout(
+        template="plotly_white",
+        paper_bgcolor="white",
+        plot_bgcolor="white",
+        font=dict(color="#111827"),
+    )
+    return fig
+
+# ---------- Core engine (pure + cached) ----------
+def project_cashflows(
+    loans_df: pd.DataFrame,
+    horizon_months: int,
+    pd_unit: str,
+    PD_multiplier: float,
+    LGD_shift: float,
+    SMM_eff: float,
+    fee_m: float,
+    d_m: float,
+    recovery_lag_m: int,
+) -> pd.DataFrame:
     rows = []
     for _, r in loans_df.iterrows():
         loan_id = r["loan_id"]
@@ -155,7 +224,7 @@ def project_cashflows(loans_df: pd.DataFrame, horizon_months: int) -> pd.DataFra
         if pmt <= 0.0:
             pmt = annuity_payment(bal, r_m, rem_term)
 
-        # ---- PD monthly (correct handling) ----
+        # PD monthly
         raw_pd = float(r["pd"])
         if pd_unit.startswith("Annual"):
             pd_m = annual_pd_to_monthly(raw_pd) * PD_multiplier
@@ -182,7 +251,7 @@ def project_cashflows(loans_df: pd.DataFrame, horizon_months: int) -> pd.DataFra
             # 3) Prepayment
             prepay_base = max(0.0, bal - sched_prin)
             prepay = prepay_base * SMM_eff
-            # 4) Default (expected) on survivors after prepay
+            # 4) Default on survivors after prepay
             default_base = max(0.0, prepay_base - prepay)
             def_prin = default_base * pd_m
             # 5) Loss & Recovery (recovery comes later)
@@ -208,8 +277,33 @@ def project_cashflows(loans_df: pd.DataFrame, horizon_months: int) -> pd.DataFra
         "Recoveries", "Fees", "End_Bal", "Cashflow", "PV", "Loss"
     ])
 
-# Run engine
-cf = project_cashflows(loans, months)
+@st.cache_data(show_spinner=False)
+def project_cashflows_cached(
+    loans_df_json: str,
+    horizon_months: int,
+    pd_unit: str,
+    PD_multiplier: float,
+    LGD_shift: float,
+    SMM_eff: float,
+    fee_m: float,
+    d_m: float,
+    recovery_lag_m: int,
+) -> pd.DataFrame:
+    df = pd.read_json(loans_df_json)
+    return project_cashflows(df, horizon_months, pd_unit, PD_multiplier, LGD_shift, SMM_eff, fee_m, d_m, recovery_lag_m)
+
+# Run engine (cached)
+cf = project_cashflows_cached(
+    loans.to_json(),
+    int(months),
+    pd_unit,
+    float(PD_multiplier),
+    float(LGD_shift),
+    float(SMM_eff),
+    float(fee_m),
+    float(d_m),
+    int(recovery_lag_m),
+)
 
 # ---------- Aggregation: portfolio ----------
 port = cf.groupby("t", as_index=False).agg({
@@ -248,7 +342,7 @@ NPV = float(port["PV"].sum())
 EndBal_last = float(port.loc[port["t"] == port["t"].max(), "End_Bal"].values[0]) if not port.empty else 0.0
 CumLoss = float(port["CumLoss"].iloc[-1]) if not port.empty else 0.0
 
-# ---------- Waterfall-ready ledger (dùng cho tab Tables) ----------
+# ---------- Waterfall-ready ledger (for Tables tab) ----------
 ledger = pd.DataFrame({
     "t": port["t"],
     "Beg_Bal": port["Beg_Bal"],
@@ -267,59 +361,20 @@ ledger = pd.DataFrame({
     "CumLoss": port["CumLoss"],
 })
 
-# ---------- Theme & helpers ----------
-PRIMARY = "#2457F5"   # cobalt
-ACCENT  = "#12B886"   # teal
-DANGER  = "#EF4444"
-
-st.markdown(f"""
-<style>
-.stApp {{
-  background: linear-gradient(180deg,#0b1220 0%,#0b1220 60%,#101826 100%);
-  color:#e2e8f0;
-}}
-h1,h2,h3,h4 {{ color:#e6ecff; }}
-div[data-testid="stSidebar"] {{ background:#0f172a; color:#e2e8f0; }}
-/* metric cards */
-div[data-testid="stMetric"] > div {{
-  background:#0f172a; border:1px solid #1f2a44; padding:14px 18px; border-radius:14px;
-}}
-div[data-testid="stMetricLabel"] {{ color:#cbd5e1; }}
-div[data-testid="stMetricValue"] {{ color:#e6f0ff; font-weight:700; }}
-/* expander */
-summary {{ background:#0f172a; border:1px solid #1f2a44; padding:10px 12px; border-radius:10px; }}
-details[open] > summary {{ border-bottom:1px solid #1f2a44; }}
-/* tables */
-thead tr th {{ background:#0f172a !important; color:#cdd6f4 !important; }}
-</style>
-""", unsafe_allow_html=True)
-
-def fmt_compact_money(x: float, symbol: str = "€") -> str:
-    sign = "-" if x < 0 else ""
-    n = abs(x)
-    if n >= 1e9:  val = f"{n/1e9:.2f}bn"
-    elif n >= 1e6: val = f"{n/1e6:.2f}m"
-    elif n >= 1e3: val = f"{n/1e3:.0f}k"
-    else:         val = f"{n:,.0f}"
-    return f"{sign}{symbol}{val}"
-
-def apply_fig_theme(fig: go.Figure) -> go.Figure:
-    fig.update_layout(
-        template="plotly_dark",
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor="rgba(0,0,0,0)",
-        font=dict(color="#e6ecff"),
-    )
-    return fig
-
 # Pre-format KPI strings
-NPV_str     = fmt_compact_money(NPV)
-CumLoss_str = fmt_compact_money(CumLoss)
-EndBal_str  = fmt_compact_money(EndBal_last)
-WAL_str     = f"{WAL_years:.2f}"
-Pool_str    = f"{PoolLife_years:.2f}"
+def _fmt_kpis():
+    return (
+        fmt_compact_money(NPV),
+        fmt_compact_money(CumLoss),
+        fmt_compact_money(EndBal_last),
+        f"{WAL_years:.2f}",
+        f"{PoolLife_years:.2f}",
+    )
+
+NPV_str, CumLoss_str, EndBal_str, WAL_str, Pool_str = _fmt_kpis()
 
 # ---------- TOP-LEVEL NAV ----------
+st.caption("Navigate: **Overview** → trends in **Portfolio Cashflows** → one-month **Waterfalls** → funding in **Drawdowns** → **Tables & Export**.")
 tab_overview, tab_cash, tab_wf, tab_draw, tab_tables = st.tabs(
     ["📊 Overview", "💵 Portfolio Cashflows", "🧱 Waterfalls", "💳 Drawdowns", "📑 Tables & Export"]
 )
@@ -339,7 +394,6 @@ with tab_overview:
     with r2c2: st.metric(f"End Balance (m{months})", EndBal_str)
     st.markdown("<div style='margin-top:-12px'></div>", unsafe_allow_html=True)
 
-    # Assumptions snapshot (ẩn/hiện)
     with st.expander("Assumptions snapshot (optional)", expanded=False):
         st.json({
             "pd_unit": pd_unit,
@@ -405,43 +459,46 @@ with tab_cash:
 # Tab 3: WATERFALLS
 # =========================
 with tab_wf:
-    st.markdown("### Select a month to visualize")
-    sel_month = st.slider("Month", 1, int(port["t"].max()), 1, key="wf_sel")
-    row = port.loc[port["t"] == sel_month].iloc[0]
+    if port.empty:
+        st.info("No cashflows to display.")
+    else:
+        st.markdown("### Select a month to visualize")
+        sel_month = st.slider("Month", 1, int(port["t"].max()), 1, key="wf_sel")
+        row = port.loc[port["t"] == sel_month].iloc[0]
 
-    c1, c2 = st.columns(2)
+        c1, c2 = st.columns(2)
 
-    with c1:
-        st.markdown("**Cashflow waterfall**")
-        cf_fig = go.Figure(go.Waterfall(
-            name="cashflow", orientation="v",
-            measure=["relative","relative","relative","relative","relative","total"],
-            x=["Gross Interest","Servicing Fees","Scheduled Principal","Prepayments","Recoveries","Net Cashflow"],
-            y=[row["Interest"], -row["Fees"], row["SchedPrin"], row["Prepay"], row["Recoveries"], 0],
-            text=[f"{row['Interest']:,.0f}", f"{-row['Fees']:,.0f}",
-                  f"{row['SchedPrin']:,.0f}", f"{row['Prepay']:,.0f}",
-                  f"{row['Recoveries']:,.0f}", f"{row['Cashflow']:,.0f}"],
-            textposition="outside",
-        ))
-        cf_fig.update_layout(title=f"Month {sel_month}: Cashflow Breakdown", showlegend=False, waterfallgap=0.2)
-        st.plotly_chart(apply_fig_theme(cf_fig), use_container_width=True)
+        with c1:
+            st.markdown("**Cashflow waterfall**")
+            cf_fig = go.Figure(go.Waterfall(
+                name="cashflow", orientation="v",
+                measure=["relative","relative","relative","relative","relative","total"],
+                x=["Gross Interest","Servicing Fees","Scheduled Principal","Prepayments","Recoveries","Net Cashflow"],
+                y=[row["Interest"], -row["Fees"], row["SchedPrin"], row["Prepay"], row["Recoveries"], 0],
+                text=[f"{row['Interest']:,.0f}", f"{-row['Fees']:,.0f}",
+                      f"{row['SchedPrin']:,.0f}", f"{row['Prepay']:,.0f}",
+                      f"{row['Recoveries']:,.0f}", f"{row['Cashflow']:,.0f}"],
+                textposition="outside",
+            ))
+            cf_fig.update_layout(title=f"Month {sel_month}: Cashflow Breakdown", showlegend=False, waterfallgap=0.2)
+            st.plotly_chart(apply_fig_theme(cf_fig), use_container_width=True)
 
-    with c2:
-        st.markdown("**Principal roll-forward**")
-        pr_fig = go.Figure(go.Waterfall(
-            name="principal", orientation="v",
-            measure=["absolute","relative","relative","relative","total"],
-            x=["Beginning Balance","Scheduled Principal","Prepayments","Defaults/Charge-offs","Ending Balance"],
-            y=[row["Beg_Bal"], -row["SchedPrin"], -row["Prepay"], -row["DefaultPrin"], 0],
-            text=[f"{row['Beg_Bal']:,.0f}", f"{-row['SchedPrin']:,.0f}",
-                  f"{-row['Prepay']:,.0f}", f"{-row['DefaultPrin']:,.0f}", f"{row['End_Bal']:,.0f}"],
-            textposition="outside",
-        ))
-        pr_fig.update_layout(title=f"Month {sel_month}: Principal Roll-Forward", showlegend=False, waterfallgap=0.2)
-        st.plotly_chart(apply_fig_theme(pr_fig), use_container_width=True)
+        with c2:
+            st.markdown("**Principal roll-forward**")
+            pr_fig = go.Figure(go.Waterfall(
+                name="principal", orientation="v",
+                measure=["absolute","relative","relative","relative","total"],
+                x=["Beginning Balance","Scheduled Principal","Prepayments","Defaults/Charge-offs","Ending Balance"],
+                y=[row["Beg_Bal"], -row["SchedPrin"], -row["Prepay"], -row["DefaultPrin"], 0],
+                text=[f"{row['Beg_Bal']:,.0f}", f"{-row['SchedPrin']:,.0f}",
+                      f"{-row['Prepay']:,.0f}", f"{-row['DefaultPrin']:,.0f}", f"{row['End_Bal']:,.0f}"],
+                textposition="outside",
+            ))
+            pr_fig.update_layout(title=f"Month {sel_month}: Principal Roll-Forward", showlegend=False, waterfallgap=0.2)
+            st.plotly_chart(apply_fig_theme(pr_fig), use_container_width=True)
 
 # =========================
-# Tab 3: DRAWDOWNS / REVOLVER
+# Tab 4: DRAWDOWNS / REVOLVER
 # =========================
 with tab_draw:
     st.markdown("### Drawdowns / Revolver (illustrative)")
@@ -553,7 +610,7 @@ with tab_draw:
             )
 
 # =========================
-# Tab 4: TABLES & EXPORT
+# Tab 5: TABLES & EXPORT
 # =========================
 with tab_tables:
     with st.expander("Portfolio cashflows (monthly)", expanded=False):
@@ -578,13 +635,13 @@ with tab_tables:
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
-    st.download_button("CSV — portfolio", port.to_csv(index=False).encode("utf-8"),
-                       file_name="portfolio_cashflows.csv", mime="text/csv")
-    st.download_button("CSV — loan-level", cf.to_csv(index=False).encode("utf-8"),
-                       file_name="loanlevel_cashflows.csv", mime="text/csv")
-    st.download_button("CSV — ledger", ledger.to_csv(index=False).encode("utf-8"),
-                       file_name="waterfall_feed.csv", mime="text/csv")
-
-
-
-
+    c_dl1, c_dl2, c_dl3 = st.columns(3)
+    with c_dl1:
+        st.download_button("CSV — portfolio", port.to_csv(index=False).encode("utf-8"),
+                           file_name="portfolio_cashflows.csv", mime="text/csv")
+    with c_dl2:
+        st.download_button("CSV — loan-level", cf.to_csv(index=False).encode("utf-8"),
+                           file_name="loanlevel_cashflows.csv", mime="text/csv")
+    with c_dl3:
+        st.download_button("CSV — ledger", ledger.to_csv(index=False).encode("utf-8"),
+                           file_name="waterfall_feed.csv", mime="text/csv")
