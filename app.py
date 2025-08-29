@@ -6,6 +6,7 @@ Created on Wed Aug 27 23:52:46 2025
 import pandas as pd
 import numpy as np
 import os
+import io
 import streamlit as st
 import plotly.graph_objects as go
 
@@ -286,6 +287,11 @@ with r1c3: st.metric("Pool Life (yrs)", Pool_str)
 r2c1, r2c2 = st.columns(2)
 with r2c1: st.metric("Cumulative Loss", CumLoss_str)
 with r2c2: st.metric(f"End Balance (m{months})", EndBal_str)
+
+# ---- Tiny UI tightening (KPI cards) ----
+
+st.markdown("<div style='margin-top:-10px'></div>", unsafe_allow_html=True)
+
 # ---------- Single-month Cashflow Waterfall ----------
 st.subheader("Waterfall — Cashflow (select month)")
 
@@ -358,6 +364,133 @@ stack_fig.update_layout(
 )
 st.plotly_chart(stack_fig, use_container_width=True)
 
+# ---------- Sidebar controls for drawdowns ----------
+# ---------- Drawdown simulation (optional) ----------
+st.sidebar.header("Drawdown simulation (optional)")
+enable_draw = st.sidebar.checkbox("Enable drawdown view", value=True)
+reinv_months = st.sidebar.number_input(
+    "Reinvestment period (months)",
+    min_value=0, max_value=int(months), value=min(18, int(months)), step=1
+)
+fac_rate_annual = st.sidebar.number_input(
+    "Facility interest (annual)", value=0.06, min_value=0.0, step=0.01, format="%.4f"
+)
+fac_limit = st.sidebar.number_input(
+    "Facility limit (0 = unlimited)", value=0.0, min_value=0.0, step=10000.0,
+    help="Set 0 for no limit"
+)
+
+# ---------- Drawdown engine (revolver-style) ----------
+if enable_draw:
+    st.subheader("Drawdowns / Revolver (illustrative)")
+
+    # Keep pool flat during reinvestment: purchases = run-off
+    required_purchases = port["Beg_Bal"] - port["End_Bal"]  # equals Sched + Prepay + DefaultPrin
+
+    # Cash you actually have for purchases
+    npa = ledger["Net_Principal_Available"]           # (Sched+Prepay) - Defaults + Recoveries
+    net_int_avail = ledger["Net_Interest_Available"]  # Interest - Fees
+
+    fac_rate_m = fac_rate_annual / 12.0
+
+    rows = []
+    fac_beg = 0.0
+    cum_draw = 0.0
+    cum_repay = 0.0
+
+    for i in range(len(port)):
+        t = int(port.loc[i, "t"])
+        req = float(required_purchases.iloc[i])
+        npa_t = float(npa.iloc[i])
+        nia_t = float(net_int_avail.iloc[i])
+
+        # Interest on current facility (paid from net interest; not capitalized)
+        fac_interest = fac_beg * fac_rate_m
+
+        # If we don't have enough principal cash to meet purchases, draw; otherwise repay
+        shortfall = req - npa_t
+        draw = 0.0
+        repay = 0.0
+
+        if t <= reinv_months:
+            # Reinvestment: buy assets to keep balance flat
+            if shortfall > 1e-9:
+                draw = shortfall
+                if fac_limit > 0.0:
+                    draw = max(0.0, min(draw, fac_limit - fac_beg))
+            elif shortfall < -1e-9:
+                repay = min(-shortfall, fac_beg)
+        else:
+            # Amortisation: no new purchases; use NPA to repay
+            repay = min(max(0.0, npa_t), fac_beg)
+
+        # Pay facility interest from net interest available
+        interest_shortfall = max(0.0, fac_interest - nia_t)
+
+        fac_end = fac_beg + draw - repay
+        cum_draw += draw
+        cum_repay += repay
+
+        rows.append({
+            "t": t,
+            "Beg_Facility": fac_beg,
+            "Required_Purchases": req,
+            "NPA": npa_t,
+            "Shortfall(+)/Excess(-)": shortfall,
+            "Draw": draw,
+            "Repay": repay,
+            "End_Facility": fac_end,
+            "Facility_Interest_Paid": fac_interest,
+            "Net_Interest_Available": nia_t,
+            "Interest_Shortfall": interest_shortfall,
+            "Cum_Draws": cum_draw,
+            "Cum_Repays": cum_repay,
+        })
+
+        fac_beg = fac_end
+
+    drawdf = pd.DataFrame(rows)
+    st.dataframe(drawdf.style.format("{:,.0f}"), use_container_width=True)
+
+    # KPIs
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Max Facility Balance", f"{drawdf['End_Facility'].max():,.0f}")
+    c2.metric("Final Facility Balance", f"{drawdf['End_Facility'].iloc[-1]:,.0f}")
+    c3.metric("Total Facility Interest Paid", f"{drawdf['Facility_Interest_Paid'].sum():,.0f}")
+
+    # Charts
+    # 1) Facility balance
+    fac_line = go.Figure(go.Scatter(x=drawdf["t"], y=drawdf["End_Facility"],
+                                    mode="lines+markers", name="Facility Balance"))
+    fac_line.update_layout(title="Facility Balance over time", xaxis_title="Month", yaxis_title="Balance")
+    st.plotly_chart(fac_line, use_container_width=True)
+
+    # 2) Draws vs Repayments
+    dr = go.Figure()
+    dr.add_trace(go.Bar(x=drawdf["t"], y=drawdf["Draw"], name="Draws"))
+    dr.add_trace(go.Bar(x=drawdf["t"], y=-drawdf["Repay"], name="Repayments"))  # show repays below axis
+    dr.update_layout(barmode="relative", title="Monthly Draws and Repayments",
+                     xaxis_title="Month", yaxis_title="Amount")
+    st.plotly_chart(dr, use_container_width=True)
+
+    # 3) Interest coverage
+    cov = go.Figure()
+    cov.add_trace(go.Bar(x=drawdf["t"], y=drawdf["Net_Interest_Available"], name="Net Interest Available"))
+    cov.add_trace(go.Bar(x=drawdf["t"], y=-drawdf["Facility_Interest_Paid"], name="Facility Interest"))
+    cov.add_trace(go.Bar(x=drawdf["t"], y=-drawdf["Interest_Shortfall"], name="Interest Shortfall"))
+    cov.update_layout(barmode="relative", title="Interest Coverage",
+                      xaxis_title="Month", yaxis_title="Amount")
+    st.plotly_chart(cov, use_container_width=True)
+
+    # Download schedule
+    st.download_button(
+        "Download drawdown schedule CSV",
+        drawdf.to_csv(index=False).encode("utf-8"),
+        file_name="drawdown_schedule.csv",
+        mime="text/csv",
+    )
+
+
 # ---------- Waterfall-ready ledger ----------
 ledger = pd.DataFrame({
     "t": port["t"],
@@ -386,6 +519,18 @@ st.dataframe(port.style.format("{:,.0f}"), use_container_width=True)
 st.subheader("Waterfall-ready ledger")
 st.dataframe(ledger.style.format("{:,.0f}"), use_container_width=True)
 
+# ---------- One-click Excel download ----------
+buf = io.BytesIO()
+with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+    port.to_excel(xw, index=False, sheet_name="portfolio")
+    ledger.to_excel(xw, index=False, sheet_name="ledger")
+    cf.to_excel(xw, index=False, sheet_name="loan_level")
+st.download_button(
+    "Download XLSX (portfolio, ledger, loan-level)",
+    data=buf.getvalue(),
+    file_name="cashflows.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+)
 
 # ---------- Downloads ----------
 st.download_button(
@@ -429,6 +574,7 @@ if show_log:
         "scenario": scenario,
         "include_recoveries_in_wal": include_recoveries_in_wal,
     })
+
 
 
 
