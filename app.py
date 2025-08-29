@@ -320,8 +320,8 @@ WAL_str     = f"{WAL_years:.2f}"
 Pool_str    = f"{PoolLife_years:.2f}"
 
 # ---------- TOP-LEVEL NAV ----------
-tab_overview, tab_wf, tab_draw, tab_tables = st.tabs(
-    ["📊 Overview", "🧱 Waterfalls", "💳 Drawdowns", "📑 Tables & Export"]
+tab_overview, tab_cash, tab_wf, tab_draw, tab_tables = st.tabs(
+    ["📊 Overview", "💵 Portfolio Cashflows", "🧱 Waterfalls", "💳 Drawdowns", "📑 Tables & Export"]
 )
 
 # =========================
@@ -338,27 +338,6 @@ with tab_overview:
     with r2c1: st.metric("Cumulative Loss", CumLoss_str)
     with r2c2: st.metric(f"End Balance (m{months})", EndBal_str)
     st.markdown("<div style='margin-top:-12px'></div>", unsafe_allow_html=True)
-
-    # Stacked monthly components
-    st.markdown("### Portfolio – Monthly cashflow components")
-    comp = pd.DataFrame({
-        "t": port["t"],
-        "Gross Interest": port["Interest"],
-        "Scheduled Principal": port["SchedPrin"],
-        "Prepayments": port["Prepay"],
-        "Recoveries": port["Recoveries"],
-        "Servicing Fees": -port["Fees"],
-    })
-    stack_fig = go.Figure()
-    for col in ["Gross Interest","Scheduled Principal","Prepayments","Recoveries","Servicing Fees"]:
-        stack_fig.add_trace(go.Bar(x=comp["t"], y=comp[col], name=col))
-    stack_fig.update_layout(
-        barmode="relative",
-        xaxis_title="Month",
-        yaxis_title="Amount",
-        title="Monthly Cashflow Components",
-    )
-    st.plotly_chart(apply_fig_theme(stack_fig), use_container_width=True)
 
     # Assumptions snapshot (ẩn/hiện)
     with st.expander("Assumptions snapshot (optional)", expanded=False):
@@ -381,7 +360,49 @@ with tab_overview:
         })
 
 # =========================
-# Tab 2: WATERFALLS
+# Tab 2: PORTFOLIO CASHFLOWS
+# =========================
+with tab_cash:
+    st.subheader("Monthly cashflow components (stacked)")
+    comp = pd.DataFrame({
+        "t": port["t"],
+        "Gross Interest": port["Interest"],
+        "Scheduled Principal": port["SchedPrin"],
+        "Prepayments": port["Prepay"],
+        "Recoveries": port["Recoveries"],
+        "Servicing Fees": -port["Fees"],
+    })
+    stack_fig = go.Figure()
+    for col in ["Gross Interest","Scheduled Principal","Prepayments","Recoveries","Servicing Fees"]:
+        stack_fig.add_trace(go.Bar(x=comp["t"], y=comp[col], name=col))
+    stack_fig.update_layout(barmode="relative", xaxis_title="Month", yaxis_title="Amount",
+                            title="Monthly Cashflow Components")
+    st.plotly_chart(apply_fig_theme(stack_fig), use_container_width=True)
+
+    st.markdown("### Ending balance & cumulatives")
+    bal_fig = go.Figure()
+    bal_fig.add_trace(go.Scatter(x=port["t"], y=port["End_Bal"], mode="lines", name="Ending Balance"))
+    bal_fig.add_trace(go.Scatter(x=port["t"], y=port["Loss"].cumsum(), mode="lines", name="Cumulative Loss"))
+    bal_fig.add_trace(go.Scatter(x=port["t"], y=port["Recoveries"].cumsum(), mode="lines", name="Cumulative Recoveries"))
+    bal_fig.update_layout(xaxis_title="Month", yaxis_title="Amount",
+                          title="Ending Balance, Cum Loss, Cum Recoveries")
+    st.plotly_chart(apply_fig_theme(bal_fig), use_container_width=True)
+
+    st.markdown("### Rate trends")
+    rate_df = pd.DataFrame({
+        "t": port["t"],
+        "Monthly Yield (≈ Int/BegBal)": np.where(port["Beg_Bal"]>0, port["Interest"]/port["Beg_Bal"], 0.0)*100,
+        "Charge-off Rate (Default/BegBal)": np.where(port["Beg_Bal"]>0, port["DefaultPrin"]/port["Beg_Bal"], 0.0)*100,
+        "Prepay Rate (Prepay/BegBal)": np.where(port["Beg_Bal"]>0, port["Prepay"]/port["Beg_Bal"], 0.0)*100,
+    })
+    rate_fig = go.Figure()
+    for col in ["Monthly Yield (≈ Int/BegBal)","Charge-off Rate (Default/BegBal)","Prepay Rate (Prepay/BegBal)"]:
+        rate_fig.add_trace(go.Scatter(x=rate_df["t"], y=rate_df[col], mode="lines", name=col))
+    rate_fig.update_layout(xaxis_title="Month", yaxis_title="Rate (%)", title="Portfolio Rates Over Time")
+    st.plotly_chart(apply_fig_theme(rate_fig), use_container_width=True)
+
+# =========================
+# Tab 3: WATERFALLS
 # =========================
 with tab_wf:
     st.markdown("### Select a month to visualize")
@@ -568,6 +589,7 @@ with tab_tables:
     with c_dl3:
         st.download_button("CSV — ledger", ledger.to_csv(index=False).encode("utf-8"),
                            file_name="waterfall_feed.csv", mime="text/csv", use_container_width=True)
+
 
 
 
