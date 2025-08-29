@@ -7,8 +7,8 @@ import pandas as pd
 import numpy as np
 import streamlit as st
 
-st.set_page_config(page_title="Consumer Loans – 60M Expected CF", layout="wide")
-st.title("German Consumer Loans — 60-Month Expected Cashflows")
+st.set_page_config(page_title="Loan Portfolio Cash Flow Projection", layout="wide")
+st.title("Germany Loan Portfolio Cash Flow Projection")
 
 # ---------- Helpers ----------
 def annuity_payment(balance: float, r_m: float, n: int) -> float:
@@ -267,4 +267,5 @@ st.json({
     "months": months,
     "scenario": scenario,
 })
+
 
