@@ -108,10 +108,8 @@ d_m = disc_rate / 12.0
 loans = None
 
 if file is not None:
-    # Uploaded Excel/CSV
     loans = read_loan_tape(file, sheet_name=sheet_name)
 elif use_sample:
-    # Use bundled sample next to app.py
     if os.path.exists(SAMPLE_PATH):
         loans = read_loan_tape(SAMPLE_PATH, sheet_name=sheet_name)
     else:
@@ -191,6 +189,14 @@ def fmt_compact_money(x: float, symbol: str = "€") -> str:
     elif n >= 1e3: val = f"{n/1e3:.0f}k"
     else:         val = f"{n:,.0f}"
     return f"{sign}{symbol}{val}"
+
+def number_cols_config(df: pd.DataFrame, decimals: int = 0):
+    """Build a column_config dict to format all numeric cols."""
+    cfg = {}
+    for c in df.columns:
+        if pd.api.types.is_numeric_dtype(df[c]):
+            cfg[c] = st.column_config.NumberColumn(c, format=f"%.{decimals}f")
+    return cfg
 
 def apply_fig_theme(fig: go.Figure) -> go.Figure:
     fig.update_layout(
@@ -394,25 +400,6 @@ with tab_overview:
     with r2c2: st.metric(f"End Balance (m{months})", EndBal_str)
     st.markdown("<div style='margin-top:-12px'></div>", unsafe_allow_html=True)
 
-    with st.expander("Assumptions snapshot (optional)", expanded=False):
-        st.json({
-            "pd_unit": pd_unit,
-            "CPR_annual": CPR_annual,
-            "SMM_base": SMM_base,
-            "CPR_multiplier": CPR_multiplier,
-            "SMM_eff": SMM_eff,
-            "servicing_bps": servicing_bps,
-            "fee_monthly": (servicing_bps/10000)/12,
-            "discount_annual": disc_rate,
-            "discount_monthly": d_m,
-            "recovery_lag_m": recovery_lag_m,
-            "PD_multiplier": PD_multiplier,
-            "LGD_shift": LGD_shift,
-            "months": months,
-            "scenario": scenario,
-            "include_recoveries_in_wal": include_recoveries_in_wal,
-        })
-
 # =========================
 # Tab 2: PORTFOLIO CASHFLOWS
 # =========================
@@ -601,7 +588,12 @@ with tab_draw:
         st.plotly_chart(apply_fig_theme(cov), use_container_width=True)
 
         with st.expander("Drawdown schedule (table)"):
-            st.dataframe(drawdf.style.format("{:,.0f}"), use_container_width=True)
+            # REPLACED Styler -> raw df + column_config
+            st.dataframe(
+                drawdf,
+                use_container_width=True,
+                column_config=number_cols_config(drawdf, decimals=0)
+            )
             st.download_button(
                 "Download drawdown schedule CSV",
                 drawdf.to_csv(index=False).encode("utf-8"),
@@ -614,13 +606,28 @@ with tab_draw:
 # =========================
 with tab_tables:
     with st.expander("Portfolio cashflows (monthly)", expanded=False):
-        st.dataframe(port.style.format("{:,.0f}"), use_container_width=True)
+        # REPLACED Styler -> raw df + column_config
+        st.dataframe(
+            port,
+            use_container_width=True,
+            column_config=number_cols_config(port, decimals=0)
+        )
 
     with st.expander("Waterfall-ready ledger", expanded=False):
-        st.dataframe(ledger.style.format("{:,.0f}"), use_container_width=True)
+        # REPLACED Styler -> raw df + column_config
+        st.dataframe(
+            ledger,
+            use_container_width=True,
+            column_config=number_cols_config(ledger, decimals=0)
+        )
 
     with st.expander("Loan-level cashflows", expanded=False):
-        st.dataframe(cf.style.format("{:,.0f}"), use_container_width=True)
+        # REPLACED Styler -> raw df + column_config
+        st.dataframe(
+            cf,
+            use_container_width=True,
+            column_config=number_cols_config(cf, decimals=0)
+        )
 
     # One-click Excel + CSVs
     buf = io.BytesIO()
