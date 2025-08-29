@@ -207,6 +207,20 @@ def apply_fig_theme(fig: go.Figure) -> go.Figure:
     )
     return fig
 
+def padded_range(pos_values, neg_values, pad=0.18):
+    """
+    Produce a symmetric y-range with headroom/footroom so outside labels don't clip.
+    pos_values, neg_values are lists of magnitudes (can include negatives; we abs them).
+    """
+    max_pos = max([0.0] + [float(v) for v in pos_values if np.isfinite(v)])
+    max_neg = max([0.0] + [abs(float(v)) for v in neg_values if np.isfinite(v)])
+    top = (1.0 + pad) * max_pos
+    bottom = -(1.0 + pad) * max_neg
+    # Avoid degenerate range
+    if top == 0 and bottom == 0:
+        top = 1.0
+    return [bottom, top]
+
 # ---------- Core engine (pure + cached) ----------
 def project_cashflows(
     loans_df: pd.DataFrame,
@@ -426,7 +440,7 @@ with tab_cash:
     bal_fig.add_trace(go.Scatter(x=port["t"], y=port["Loss"].cumsum(), mode="lines", name="Cumulative Loss"))
     bal_fig.add_trace(go.Scatter(x=port["t"], y=port["Recoveries"].cumsum(), mode="lines", name="Cumulative Recoveries"))
     bal_fig.update_layout(xaxis_title="Month", yaxis_title="Amount",
-                          title="Ending Balance, Cum Loss, Cum Recoveries")
+                          title="Ending Balance, Cum Loss, Cum Recoveries"))
     st.plotly_chart(apply_fig_theme(bal_fig), use_container_width=True)
 
     st.markdown("### Rate trends")
@@ -442,6 +456,36 @@ with tab_cash:
     rate_fig.update_layout(xaxis_title="Month", yaxis_title="Rate (%)", title="Portfolio Rates Over Time")
     st.plotly_chart(apply_fig_theme(rate_fig), use_container_width=True)
 
+    # ---------- NEW: Loan-level explorer ----------
+    with st.expander("Loan-level explorer", expanded=False):
+        loan_ids = cf["loan_id"].unique().tolist()
+        if len(loan_ids) == 0:
+            st.info("No loans found.")
+        else:
+            loan_sel = st.selectbox("Select a loan_id", sorted(loan_ids))
+            ldf = cf[cf["loan_id"] == loan_sel].copy()
+
+            # Balances
+            lbal = go.Figure()
+            lbal.add_trace(go.Scatter(x=ldf["t"], y=ldf["Beg_Bal"], mode="lines", name="Beginning Balance"))
+            lbal.add_trace(go.Scatter(x=ldf["t"], y=ldf["End_Bal"], mode="lines", name="Ending Balance"))
+            lbal.update_layout(title=f"Loan {loan_sel} — Balances", xaxis_title="Month", yaxis_title="Amount")
+            st.plotly_chart(apply_fig_theme(lbal), use_container_width=True)
+
+            # Components
+            lcomp = go.Figure()
+            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["Interest"], name="Interest"))
+            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["SchedPrin"], name="Scheduled Principal"))
+            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["Prepay"], name="Prepayments"))
+            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["Recoveries"], name="Recoveries"))
+            lcomp.add_trace(go.Bar(x=ldf["t"], y=-ldf["Fees"], name="Fees"))  # below axis
+            lcomp.update_layout(barmode="relative", title=f"Loan {loan_sel} — Monthly Components",
+                                xaxis_title="Month", yaxis_title="Amount")
+            st.plotly_chart(apply_fig_theme(lcomp), use_container_width=True)
+
+            st.dataframe(ldf, use_container_width=True,
+                         column_config=number_cols_config(ldf, decimals=0))
+
 # =========================
 # Tab 3: WATERFALLS
 # =========================
@@ -455,6 +499,7 @@ with tab_wf:
 
         c1, c2 = st.columns(2)
 
+        # ---- Cashflow waterfall ----
         with c1:
             st.markdown("**Cashflow waterfall**")
             cf_fig = go.Figure(go.Waterfall(
@@ -467,9 +512,24 @@ with tab_wf:
                       f"{row['Recoveries']:,.0f}", f"{row['Cashflow']:,.0f}"],
                 textposition="outside",
             ))
-            cf_fig.update_layout(title=f"Month {sel_month}: Cashflow Breakdown", showlegend=False, waterfallgap=0.2)
+            # NEW: ensure labels are never clipped
+            pos_vals_cf = [row["Interest"], row["SchedPrin"], row["Prepay"], row["Recoveries"], max(row["Cashflow"], 0)]
+            neg_vals_cf = [row["Fees"], min(row["Cashflow"], 0)]
+            cf_fig.update_yaxes(range=padded_range(pos_vals_cf, neg_vals_cf), automargin=True)
+            cf_fig.update_xaxes(automargin=True)
+            cf_fig.update_layout(
+                title=f"Month {sel_month}: Cashflow Breakdown",
+                showlegend=False,
+                waterfallgap=0.2,
+                height=560,
+                margin=dict(t=80, b=80, l=60, r=40),
+                uniformtext_minsize=10, uniformtext_mode="hide",
+            )
+            # let text draw outside plotting area if needed
+            cf_fig.update_traces(cliponaxis=False)
             st.plotly_chart(apply_fig_theme(cf_fig), use_container_width=True)
 
+        # ---- Principal roll-forward waterfall ----
         with c2:
             st.markdown("**Principal roll-forward**")
             pr_fig = go.Figure(go.Waterfall(
@@ -481,7 +541,20 @@ with tab_wf:
                       f"{-row['Prepay']:,.0f}", f"{-row['DefaultPrin']:,.0f}", f"{row['End_Bal']:,.0f}"],
                 textposition="outside",
             ))
-            pr_fig.update_layout(title=f"Month {sel_month}: Principal Roll-Forward", showlegend=False, waterfallgap=0.2)
+            # NEW: padded y-range + taller chart
+            pos_vals_pr = [row["Beg_Bal"], row["End_Bal"]]
+            neg_vals_pr = [row["SchedPrin"], row["Prepay"], row["DefaultPrin"]]
+            pr_fig.update_yaxes(range=padded_range(pos_vals_pr, neg_vals_pr), automargin=True)
+            pr_fig.update_xaxes(automargin=True)
+            pr_fig.update_layout(
+                title=f"Month {sel_month}: Principal Roll-Forward",
+                showlegend=False,
+                waterfallgap=0.2,
+                height=560,
+                margin=dict(t=80, b=80, l=60, r=40),
+                uniformtext_minsize=10, uniformtext_mode="hide",
+            )
+            pr_fig.update_traces(cliponaxis=False)
             st.plotly_chart(apply_fig_theme(pr_fig), use_container_width=True)
 
 # =========================
@@ -588,7 +661,6 @@ with tab_draw:
         st.plotly_chart(apply_fig_theme(cov), use_container_width=True)
 
         with st.expander("Drawdown schedule (table)"):
-            # REPLACED Styler -> raw df + column_config
             st.dataframe(
                 drawdf,
                 use_container_width=True,
@@ -606,7 +678,6 @@ with tab_draw:
 # =========================
 with tab_tables:
     with st.expander("Portfolio cashflows (monthly)", expanded=False):
-        # REPLACED Styler -> raw df + column_config
         st.dataframe(
             port,
             use_container_width=True,
@@ -614,7 +685,6 @@ with tab_tables:
         )
 
     with st.expander("Waterfall-ready ledger", expanded=False):
-        # REPLACED Styler -> raw df + column_config
         st.dataframe(
             ledger,
             use_container_width=True,
@@ -622,7 +692,6 @@ with tab_tables:
         )
 
     with st.expander("Loan-level cashflows", expanded=False):
-        # REPLACED Styler -> raw df + column_config
         st.dataframe(
             cf,
             use_container_width=True,
