@@ -10,7 +10,7 @@ import streamlit as st
 import plotly.graph_objects as go
 
 st.set_page_config(page_title="Loan Portfolio Cash Flow Projection", layout="wide")
-st.title("GERMANY LOAN PORTFOLIO CASH FLOW PROJECTION")
+st.title("GERMAN LOAN PORTFOLIO CASH FLOW PROJECTION")
 
 # ---------- Helpers ----------
 def annuity_payment(balance: float, r_m: float, n: int) -> float:
@@ -581,7 +581,7 @@ with tab_wf:
 
 # ===== DRAWDOWNS =====
 with tab_draw:
-    st.markdown("### Drawdowns / Revolver (illustrative)")
+    st.markdown("### Drawdowns / Revolver")
     with st.expander("Parameters", expanded=False):
         enable_draw = st.checkbox("Enable drawdown view", value=True)
         reinv_months = st.number_input("Reinvestment period (months)", min_value=0, max_value=int(months),
@@ -657,5 +657,6 @@ with tab_tables:
             reinv_default, rate_default, limit_default = scenario_defaults_for_drawdown(scenario, opening_pool, months)
             drawdf_tbl = compute_drawdowns(port, reinv_default, rate_default, limit_default)
         st.dataframe(drawdf_tbl, use_container_width=True, column_config=number_cols_config(drawdf_tbl, decimals=0))
+
 
 
