@@ -105,18 +105,25 @@ d_m = disc_rate / 12.0
 
 # ---------- Load data ----------
 loans = None
+
 if file is not None:
+    # Uploaded Excel/CSV
     loans = read_loan_tape(file, sheet_name=sheet_name)
+
 elif use_sample:
+    # Use bundled sample next to app.py
     if os.path.exists(SAMPLE_PATH):
         loans = read_loan_tape(SAMPLE_PATH, sheet_name=sheet_name)
     else:
-        csv_path = os.path.splitext(SAMPLE_PATH)[0] + ".csv"
-        if os.path.exists(csv_path):
-            loans = pd.read_csv(csv_path)
+        st.error(
+            f"Sample file '{SAMPLE_PATH}' not found in the app folder. "
+            "Either upload a file via the sidebar or commit the sample "
+            "Excel/CSV to the repo root with exactly this name."
+        )
+        st.stop()
 
 if loans is None:
-    st.info("Upload a loan tape or tick 'Use bundled sample file' to run the model.")
+    st.info("Upload a loan tape or untick 'Use bundled sample file' to run the model.")
     st.stop()
 
 # Required schema
@@ -248,34 +255,6 @@ k3.metric("Pool Life (yrs)", f"{PoolLife_years:,.2f}")
 k4.metric("Cumulative Loss", f"{CumLoss:,.0f}")
 k5.metric(f"End Balance (m{months})", f"{EndBal_last:,.0f}")
 
-# ---------- Waterfall-ready ledger ----------
-ledger = pd.DataFrame({
-    "t": port["t"],
-    "Beg_Bal": port["Beg_Bal"],
-    # Interest side
-    "Gross_Interest": port["Interest"],
-    "Servicing_Fees": port["Fees"],
-    "Net_Interest_Available": port["Interest"] - port["Fees"],
-    # Principal side
-    "Scheduled_Principal": port["SchedPrin"],
-    "Prepayments": port["Prepay"],
-    "Principal_Collections": port["SchedPrin"] + port["Prepay"],
-    "Defaults_ChargeOffs": port["DefaultPrin"],
-    "Recoveries": port["Recoveries"],
-    "Net_Principal_Available": (port["SchedPrin"] + port["Prepay"]) - port["DefaultPrin"] + port["Recoveries"],
-    # Roll-forward & valuation
-    "End_Bal": port["End_Bal"],
-    "Cashflow": port["Cashflow"],
-    "PV": port["PV"],
-    "CumLoss": port["CumLoss"],
-})
-
-st.subheader("Portfolio cashflows (monthly)")
-st.dataframe(port.style.format("{:,.0f}"), use_container_width=True)
-
-st.subheader("Waterfall-ready ledger")
-st.dataframe(ledger.style.format("{:,.0f}"), use_container_width=True)
-
 # ---------- Single-month Cashflow Waterfall ----------
 st.subheader("Waterfall — Cashflow (select month)")
 
@@ -348,6 +327,35 @@ stack_fig.update_layout(
 )
 st.plotly_chart(stack_fig, use_container_width=True)
 
+# ---------- Waterfall-ready ledger ----------
+ledger = pd.DataFrame({
+    "t": port["t"],
+    "Beg_Bal": port["Beg_Bal"],
+    # Interest side
+    "Gross_Interest": port["Interest"],
+    "Servicing_Fees": port["Fees"],
+    "Net_Interest_Available": port["Interest"] - port["Fees"],
+    # Principal side
+    "Scheduled_Principal": port["SchedPrin"],
+    "Prepayments": port["Prepay"],
+    "Principal_Collections": port["SchedPrin"] + port["Prepay"],
+    "Defaults_ChargeOffs": port["DefaultPrin"],
+    "Recoveries": port["Recoveries"],
+    "Net_Principal_Available": (port["SchedPrin"] + port["Prepay"]) - port["DefaultPrin"] + port["Recoveries"],
+    # Roll-forward & valuation
+    "End_Bal": port["End_Bal"],
+    "Cashflow": port["Cashflow"],
+    "PV": port["PV"],
+    "CumLoss": port["CumLoss"],
+})
+
+st.subheader("Portfolio cashflows (monthly)")
+st.dataframe(port.style.format("{:,.0f}"), use_container_width=True)
+
+st.subheader("Waterfall-ready ledger")
+st.dataframe(ledger.style.format("{:,.0f}"), use_container_width=True)
+
+
 # ---------- Downloads ----------
 st.download_button(
     "Download portfolio CSV",
@@ -387,5 +395,6 @@ st.json({
     "scenario": scenario,
     "include_recoveries_in_wal": include_recoveries_in_wal,
 })
+
 
 
