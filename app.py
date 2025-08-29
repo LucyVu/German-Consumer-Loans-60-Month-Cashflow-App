@@ -380,6 +380,32 @@ fac_limit = st.sidebar.number_input(
     help="Set 0 for no limit"
 )
 
+# --- Make drawdown params follow the scenario (after fac_limit is set) ---
+link_drawdown_to_scenario = st.sidebar.checkbox(
+    "Auto-stress facility with scenario", value=True,
+    help="If on, facility rate / reinvestment window (and optional cap) move with the Base/Downside/Upside selection."
+)
+
+if link_drawdown_to_scenario:
+    # You already computed 'port' above, so its first Beg_Bal is available
+    opening_pool = float(port["Beg_Bal"].iloc[0]) if not port.empty else 0.0
+
+    if scenario == "Downside":
+        # tighter & more expensive funding; shorter reinvestment; optional cap
+        fac_rate_annual = max(fac_rate_annual, 0.075)   # +150 bps stress
+        reinv_months    = min(reinv_months, 9)          # stop reinvesting earlier
+        if fac_limit == 0.0:                             # only if user didn't set a limit
+            fac_limit = 0.85 * opening_pool             # ~85% advance as an example
+
+    elif scenario == "Upside":
+        # cheaper funding; allow longer reinvestment
+        fac_rate_annual = min(fac_rate_annual, 0.050)   # ~5%
+        reinv_months    = min(reinv_months, 24)
+
+    else:  # Base
+        fac_rate_annual = max(fac_rate_annual, 0.060)   # ~6%
+        reinv_months    = min(reinv_months, 18)
+
 # ---------- Drawdown engine (revolver-style) ----------
 if enable_draw:
     st.subheader("Drawdowns / Revolver (illustrative)")
@@ -493,7 +519,6 @@ if enable_draw:
         mime="text/csv",
     )
 
-
 # ---------- Waterfall-ready ledger ----------
 ledger = pd.DataFrame({
     "t": port["t"],
@@ -577,6 +602,7 @@ if show_log:
         "scenario": scenario,
         "include_recoveries_in_wal": include_recoveries_in_wal,
     })
+
 
 
 
