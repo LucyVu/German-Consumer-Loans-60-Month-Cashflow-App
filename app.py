@@ -141,9 +141,6 @@ if missing:
     st.error(f"Missing required columns: {missing}")
     st.stop()
 
-st.subheader("Loan tape preview")
-st.dataframe(loans.head(), use_container_width=True)
-
 # ---------- Core engine ----------
 def project_cashflows(loans_df: pd.DataFrame, horizon_months: int) -> pd.DataFrame:
     rows = []
@@ -398,6 +395,7 @@ if show_log:
         "scenario": scenario,
         "include_recoveries_in_wal": include_recoveries_in_wal,
     })
+
 
 
 
