@@ -135,54 +135,58 @@ if missing:
     st.stop()
 
 # ---------- Theme & helpers ----------
-# Core palette: white/black/gray + two blues
-PRIMARY = "#2457F5"      # cobalt blue
-PRIMARY_L = "#60A5FA"    # light blue
-BLACK   = "#111827"
-GRAY_D  = "#6B7280"
-GRAY_M  = "#9CA3AF"
-BORDER  = "#E5E7EB"
+# Blues from your palette + greys
+BLUE_900 = "#072F5F"
+BLUE_700 = "#1261A0"
+BLUE_500 = "#3895D3"
+BLUE_300 = "#58CCED"
+
+GRAY_050 = "#F8FAFC"
+GRAY_100 = "#F1F5F9"
+GRAY_200 = "#E5E7EB"
+GRAY_400 = "#9CA3AF"
+GRAY_700 = "#374151"
+BLACK    = "#111827"
+WHITE    = "#FFFFFF"
 
 st.markdown(f"""
 <style>
-:root {{
-  --primary: {PRIMARY};
-  --primary-light: {PRIMARY_L};
-  --text: {BLACK};
-  --muted: {GRAY_D};
-  --border: {BORDER};
-}}
 /* App + headings */
-.stApp {{ background:#ffffff; color:var(--text); }}
-h1,h2,h3,h4 {{ color:var(--text); }}
+.stApp {{ background:{WHITE}; color:{BLACK}; }}
+h1,h2,h3,h4 {{ color:{BLACK}; }}
 
 /* Sidebar */
-div[data-testid="stSidebar"]{{
-  background:#f8fafc; color:var(--text); border-right:1px solid var(--border);
+div[data-testid="stSidebar"] {{
+  background:{GRAY_050}; color:{BLACK}; border-right:1px solid {GRAY_200};
 }}
 
-/* Metric cards */
+/* Metric cards (professional look) */
 div[data-testid="stMetric"] > div {{
-  background:#ffffff; border:1px solid var(--border); padding:14px 18px; border-radius:14px;
+  background:#F5F7FA;              /* light grey */
+  border:1px solid {GRAY_200};
+  border-left:6px solid {BLUE_700}; /* brand accent */
+  padding:14px 18px; border-radius:14px;
+  box-shadow:0 1px 2px rgba(17,24,39,.04);
 }}
-div[data-testid="stMetricLabel"] {{ color:var(--muted); }}
-div[data-testid="stMetricValue"] {{ color:var(--primary); font-weight:700; }}
+div[data-testid="stMetricLabel"] {{ color:#6B7280; }}
+div[data-testid="stMetricValue"] {{ color:{BLACK}; font-weight:800; }}
 
 /* Expander */
-summary {{ background:#ffffff; border:1px solid var(--border); padding:10px 12px; border-radius:10px; }}
-details[open] > summary {{ border-bottom:1px solid var(--border); }}
+summary {{ background:{WHITE}; border:1px solid {GRAY_200}; padding:10px 12px; border-radius:10px; }}
+details[open] > summary {{ border-bottom:1px solid {GRAY_200}; }}
 
 /* Tables */
-thead tr th {{ background:#f9fafb !important; color:var(--text) !important; }}
+thead tr th {{ background:{GRAY_100} !important; color:{BLACK} !important; }}
 
 /* Scenario badge */
 .badge {{
   display:inline-block; padding:6px 10px; border-radius:999px;
-  background:#e8efff; border:1px solid #c7d2fe; color:#1e3a8a;
+  background:#E8F0FF; border:1px solid #C7D2FE; color:{BLUE_900};
   font-size:0.85rem; font-weight:600; letter-spacing:.2px;
 }}
 </style>
 """, unsafe_allow_html=True)
+
 
 # Scenario badge under the title
 st.markdown(f"<span class='badge'>Scenario: {scenario}</span>", unsafe_allow_html=True)
@@ -205,15 +209,12 @@ def number_cols_config(df: pd.DataFrame, decimals: int = 0):
     return cfg
 
 def apply_fig_theme(fig: go.Figure) -> go.Figure:
-    # Consistent colors + subtle gray grid
     fig.update_layout(
-        template="plotly_white",
-        paper_bgcolor="white",
-        plot_bgcolor="white",
+        template="simple_white",
+        paper_bgcolor=WHITE,
+        plot_bgcolor=WHITE,
         font=dict(color=BLACK),
-        colorway=[PRIMARY, PRIMARY_L, BLACK, GRAY_D, GRAY_M],
-        xaxis=dict(gridcolor=BORDER),
-        yaxis=dict(gridcolor=BORDER),
+        colorway=[BLUE_900, BLUE_700, BLUE_500, BLUE_300, GRAY_400]
     )
     return fig
 
@@ -483,20 +484,37 @@ with tab_cash:
         "Recoveries": port["Recoveries"],
         "Servicing Fees": -port["Fees"],
     })
+    series_colors = {
+        "Gross Interest": BLUE_700,
+        "Scheduled Principal": BLUE_500,
+        "Prepayments": BLUE_300,
+        "Recoveries": BLUE_900,
+        "Servicing Fees": GRAY_400,
+    }
     stack_fig = go.Figure()
     for col in ["Gross Interest","Scheduled Principal","Prepayments","Recoveries","Servicing Fees"]:
-        stack_fig.add_trace(go.Bar(x=comp["t"], y=comp[col], name=col))
-    stack_fig.update_layout(barmode="relative", xaxis_title="Month", yaxis_title="Amount",
-                            title="Monthly Cashflow Components")
+        stack_fig.add_trace(go.Bar(x=comp["t"], y=comp[col], name=col, marker_color=series_colors[col]))
+    stack_fig.update_layout(
+        barmode="relative", xaxis_title="Month", yaxis_title="Amount",
+        title="Monthly Cashflow Components"
+    )
     st.plotly_chart(apply_fig_theme(stack_fig), use_container_width=True)
 
     st.markdown("### Ending balance & cumulatives")
     bal_fig = go.Figure()
-    bal_fig.add_trace(go.Scatter(x=port["t"], y=port["End_Bal"], mode="lines", name="Ending Balance"))
-    bal_fig.add_trace(go.Scatter(x=port["t"], y=port["Loss"].cumsum(), mode="lines", name="Cumulative Loss"))
-    bal_fig.add_trace(go.Scatter(x=port["t"], y=port["Recoveries"].cumsum(), mode="lines", name="Cumulative Recoveries"))
-    bal_fig.update_layout(xaxis_title="Month", yaxis_title="Amount", title="Ending Balance, Cum Loss, Cum Recoveries")
+    bal_fig.add_trace(go.Scatter(x=port["t"], y=port["End_Bal"],
+                             mode="lines", name="Ending Balance",
+                             line=dict(color=BLUE_700, width=2)))
+    bal_fig.add_trace(go.Scatter(x=port["t"], y=port["Loss"].cumsum(),
+                             mode="lines", name="Cumulative Loss",
+                             line=dict(color=BLUE_500, width=2)))
+    bal_fig.add_trace(go.Scatter(x=port["t"], y=port["Recoveries"].cumsum(),
+                             mode="lines", name="Cumulative Recoveries",
+                             line=dict(color=BLUE_300, width=2)))
+    bal_fig.update_layout(xaxis_title="Month", yaxis_title="Amount",
+                      title="Ending Balance, Cum Loss, Cum Recoveries")
     st.plotly_chart(apply_fig_theme(bal_fig), use_container_width=True)
+
 
     st.markdown("### Rate trends")
     rate_df = pd.DataFrame({
@@ -506,11 +524,14 @@ with tab_cash:
         "Prepay Rate (Prepay/BegBal)": np.where(port["Beg_Bal"]>0, port["Prepay"]/port["Beg_Bal"], 0.0)*100,
     })
     rate_fig = go.Figure()
-    for col in ["Monthly Yield (≈ Int/BegBal)","Charge-off Rate (Default/BegBal)","Prepay Rate (Prepay/BegBal)"]:
-        rate_fig.add_trace(go.Scatter(x=rate_df["t"], y=rate_df[col], mode="lines", name=col))
+    for col, colr in zip(
+        ["Monthly Yield (≈ Int/BegBal)","Charge-off Rate (Default/BegBal)","Prepay Rate (Prepay/BegBal)"],
+        [BLUE_700, BLUE_500, BLUE_300]
+    ):
+        rate_fig.add_trace(go.Scatter(x=rate_df["t"], y=rate_df[col], mode="lines", name=col, line=dict(color=colr, width=2)))
     rate_fig.update_layout(xaxis_title="Month", yaxis_title="Rate (%)", title="Portfolio Rates Over Time")
     st.plotly_chart(apply_fig_theme(rate_fig), use_container_width=True)
-
+    
     # ---------- Loan-level explorer ----------
     with st.expander("Loan-level explorer", expanded=False):
         loan_ids = cf["loan_id"].unique().tolist()
@@ -519,20 +540,23 @@ with tab_cash:
         else:
             loan_sel = st.selectbox("Select a loan_id", sorted(loan_ids))
             ldf = cf[cf["loan_id"] == loan_sel].copy()
-
+    # Balances
             lbal = go.Figure()
-            lbal.add_trace(go.Scatter(x=ldf["t"], y=ldf["Beg_Bal"], mode="lines", name="Beginning Balance"))
-            lbal.add_trace(go.Scatter(x=ldf["t"], y=ldf["End_Bal"], mode="lines", name="Ending Balance"))
+            lbal.add_trace(go.Scatter(x=ldf["t"], y=ldf["Beg_Bal"], mode="lines", name="Beginning Balance",
+                              line=dict(color=BLUE_900, width=2)))
+            lbal.add_trace(go.Scatter(x=ldf["t"], y=ldf["End_Bal"], mode="lines", name="Ending Balance",
+                              line=dict(color=BLUE_700, width=2)))
             lbal.update_layout(title=f"Loan {loan_sel} — Balances", xaxis_title="Month", yaxis_title="Amount",
                                height=420, margin=dict(t=60, b=60, l=60, r=40))
             st.plotly_chart(apply_fig_theme(lbal), use_container_width=True)
 
+    # Monthly components
             lcomp = go.Figure()
-            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["Interest"], name="Interest"))
-            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["SchedPrin"], name="Scheduled Principal"))
-            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["Prepay"], name="Prepayments"))
-            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["Recoveries"], name="Recoveries"))
-            lcomp.add_trace(go.Bar(x=ldf["t"], y=-ldf["Fees"], name="Fees"))
+            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["Interest"], name="Interest", marker_color=BLUE_700))
+            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["SchedPrin"], name="Scheduled Principal", marker_color=BLUE_500))
+            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["Prepay"], name="Prepayments", marker_color=BLUE_300))
+            lcomp.add_trace(go.Bar(x=ldf["t"], y=ldf["Recoveries"], name="Recoveries", marker_color=BLUE_900))
+            lcomp.add_trace(go.Bar(x=ldf["t"], y=-ldf["Fees"], name="Fees", marker_color=GRAY_400))
             lcomp.update_layout(barmode="relative", title=f"Loan {loan_sel} — Monthly Components",
                                 xaxis_title="Month", yaxis_title="Amount",
                                 height=420, margin=dict(t=60, b=60, l=60, r=40))
@@ -570,6 +594,15 @@ with tab_wf:
                 decreasing={"marker": {"color": GRAY_M}},
                 totals={"marker": {"color": PRIMARY_L}},
             ))
+            cf_fig.update_traces(
+                increasing=dict(marker=dict(color=BLUE_500)),
+                decreasing=dict(marker=dict(color=GRAY_400)),
+                totals=dict(marker=dict(color=BLUE_700)),
+                connector=dict(line=dict(color=BLUE_300, width=2)),
+                textfont=dict(color=BLACK),
+                cliponaxis=False
+            )
+            
             # padded y-range so labels don't clip + more height/margins
             pos_vals_cf = [row["Interest"], row["SchedPrin"], row["Prepay"], row["Recoveries"], max(row["Cashflow"], 0)]
             neg_vals_cf = [row["Fees"], min(row["Cashflow"], 0)]
@@ -601,6 +634,16 @@ with tab_wf:
                 decreasing={"marker": {"color": GRAY_M}},
                 totals={"marker": {"color": PRIMARY_L}},
             ))
+
+            pr_fig.update_traces(
+                increasing=dict(marker=dict(color=BLUE_700)),
+                decreasing=dict(marker=dict(color=BLUE_500)),  # hoặc GRAY_400 nếu muốn âm màu xám
+                totals=dict(marker=dict(color=BLUE_700)),
+                connector=dict(line=dict(color=BLUE_300, width=2)),
+                textfont=dict(color=BLACK),
+                cliponaxis=False
+            )
+            
             pos_vals_pr = [row["Beg_Bal"], row["End_Bal"]]
             neg_vals_pr = [row["SchedPrin"], row["Prepay"], row["DefaultPrin"]]
             pr_fig.update_yaxes(range=padded_range(pos_vals_pr, neg_vals_pr), automargin=True, fixedrange=False)
@@ -722,16 +765,4 @@ with tab_tables:
             column_config=number_cols_config(drawdf_tbl, decimals=0)
         )
        
-    # ---- Removed the big top XLSX download per your request ----
-    # Keep only the three CSV buttons below:
-    c_dl1, c_dl2, c_dl3 = st.columns(3)
-    with c_dl1:
-        st.download_button("CSV — portfolio", port.to_csv(index=False).encode("utf-8"),
-                           file_name="portfolio_cashflows.csv", mime="text/csv")
-    with c_dl2:
-        st.download_button("CSV — loan-level", cf.to_csv(index=False).encode("utf-8"),
-                           file_name="loanlevel_cashflows.csv", mime="text/csv")
-    with c_dl3:
-        st.download_button("CSV — ledger", ledger.to_csv(index=False).encode("utf-8"),
-                           file_name="waterfall_feed.csv", mime="text/csv")
 
