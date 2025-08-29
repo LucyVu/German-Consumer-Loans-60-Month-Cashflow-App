@@ -590,10 +590,8 @@ with tab_wf:
                       f"{row['SchedPrin']:,.0f}", f"{row['Prepay']:,.0f}",
                       f"{row['Recoveries']:,.0f}", f"{row['Cashflow']:,.0f}"],
                 textposition="outside",
-                increasing={"marker": {"color": PRIMARY}},
-                decreasing={"marker": {"color": GRAY_M}},
-                totals={"marker": {"color": PRIMARY_L}},
             ))
+            # Use the new palette
             cf_fig.update_traces(
                 increasing=dict(marker=dict(color=BLUE_500)),
                 decreasing=dict(marker=dict(color=GRAY_400)),
@@ -616,7 +614,6 @@ with tab_wf:
                 margin=dict(t=120, b=100, l=70, r=50),
                 uniformtext_minsize=10, uniformtext_mode="hide",
             )
-            cf_fig.update_traces(cliponaxis=False)  # allow outside labels
             st.plotly_chart(apply_fig_theme(cf_fig), use_container_width=True)
 
         # ---- Principal roll-forward waterfall ----
@@ -630,14 +627,11 @@ with tab_wf:
                 text=[f"{row['Beg_Bal']:,.0f}", f"{-row['SchedPrin']:,.0f}",
                       f"{-row['Prepay']:,.0f}", f"{-row['DefaultPrin']:,.0f}", f"{row['End_Bal']:,.0f}"],
                 textposition="outside",
-                increasing={"marker": {"color": PRIMARY}},   # only used for absolute bar start
-                decreasing={"marker": {"color": GRAY_M}},
-                totals={"marker": {"color": PRIMARY_L}},
             ))
-
+            # Use the new palette
             pr_fig.update_traces(
-                increasing=dict(marker=dict(color=BLUE_700)),
-                decreasing=dict(marker=dict(color=BLUE_500)),  # hoặc GRAY_400 nếu muốn âm màu xám
+                increasing=dict(marker=dict(color=BLUE_700)),   # the opening absolute bar color
+                decreasing=dict(marker=dict(color=BLUE_500)),   # the negative bars
                 totals=dict(marker=dict(color=BLUE_700)),
                 connector=dict(line=dict(color=BLUE_300, width=2)),
                 textfont=dict(color=BLACK),
@@ -656,7 +650,6 @@ with tab_wf:
                 margin=dict(t=120, b=100, l=70, r=50),
                 uniformtext_minsize=10, uniformtext_mode="hide",
             )
-            pr_fig.update_traces(cliponaxis=False)
             st.plotly_chart(apply_fig_theme(pr_fig), use_container_width=True)
 
 # =========================
@@ -765,4 +758,5 @@ with tab_tables:
             column_config=number_cols_config(drawdf_tbl, decimals=0)
         )
        
+
 
