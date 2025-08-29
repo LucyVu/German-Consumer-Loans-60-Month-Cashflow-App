@@ -721,13 +721,7 @@ with tab_tables:
             drawdf_tbl, use_container_width=True,
             column_config=number_cols_config(drawdf_tbl, decimals=0)
         )
-        st.download_button(
-            "Download drawdown schedule CSV",
-            drawdf_tbl.to_csv(index=False).encode("utf-8"),
-            file_name="drawdown_schedule.csv",
-            mime="text/csv",
-        )
-
+       
     # ---- Removed the big top XLSX download per your request ----
     # Keep only the three CSV buttons below:
     c_dl1, c_dl2, c_dl3 = st.columns(3)
@@ -740,3 +734,4 @@ with tab_tables:
     with c_dl3:
         st.download_button("CSV — ledger", ledger.to_csv(index=False).encode("utf-8"),
                            file_name="waterfall_feed.csv", mime="text/csv")
+
