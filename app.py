@@ -11,7 +11,7 @@ import streamlit as st
 import plotly.graph_objects as go
 
 st.set_page_config(page_title="Loan Portfolio Cash Flow Projection", layout="wide")
-st.title("Germany Loan Portfolio Cash Flow Projection")
+st.title("GERMANY LOAN PORTFOLIO CASH FLOW PROJECTION")
 
 # ---------- Helpers ----------
 def annuity_payment(balance: float, r_m: float, n: int) -> float:
@@ -576,20 +576,14 @@ with tab_tables:
         data=buf.getvalue(),
         file_name="cashflows.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
     )
 
-    c_dl1, c_dl2, c_dl3 = st.columns(3)
-    with c_dl1:
-        st.download_button("CSV — portfolio", port.to_csv(index=False).encode("utf-8"),
-                           file_name="portfolio_cashflows.csv", mime="text/csv", use_container_width=True)
-    with c_dl2:
-        st.download_button("CSV — loan-level", cf.to_csv(index=False).encode("utf-8"),
-                           file_name="loanlevel_cashflows.csv", mime="text/csv", use_container_width=True)
-    with c_dl3:
-        st.download_button("CSV — ledger", ledger.to_csv(index=False).encode("utf-8"),
-                           file_name="waterfall_feed.csv", mime="text/csv", use_container_width=True)
-
+    st.download_button("CSV — portfolio", port.to_csv(index=False).encode("utf-8"),
+                       file_name="portfolio_cashflows.csv", mime="text/csv")
+    st.download_button("CSV — loan-level", cf.to_csv(index=False).encode("utf-8"),
+                       file_name="loanlevel_cashflows.csv", mime="text/csv")
+    st.download_button("CSV — ledger", ledger.to_csv(index=False).encode("utf-8"),
+                       file_name="waterfall_feed.csv", mime="text/csv")
 
 
 
