@@ -387,9 +387,12 @@ if enable_draw:
     # Keep pool flat during reinvestment: purchases = run-off
     required_purchases = port["Beg_Bal"] - port["End_Bal"]  # equals Sched + Prepay + DefaultPrin
 
-    # Cash you actually have for purchases
-    npa = ledger["Net_Principal_Available"]           # (Sched+Prepay) - Defaults + Recoveries
-    net_int_avail = ledger["Net_Interest_Available"]  # Interest - Fees
+    # Cash you actually have for purchases (compute directly from 'port')
+    # NPA = (Scheduled + Prepay) - Defaults + Recoveries
+    npa = (port["SchedPrin"] + port["Prepay"]) - port["DefaultPrin"] + port["Recoveries"]
+
+    # Net interest available = Interest - Fees
+    net_int_avail = port["Interest"] - port["Fees"]
 
     fac_rate_m = fac_rate_annual / 12.0
 
@@ -574,6 +577,7 @@ if show_log:
         "scenario": scenario,
         "include_recoveries_in_wal": include_recoveries_in_wal,
     })
+
 
 
 
