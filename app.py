@@ -377,10 +377,8 @@ st.download_button(
 )
 
 # ---------- Assumption log ----------
-# --- put this near the top of the page (e.g., after other sidebar inputs)
 show_log = st.sidebar.checkbox("Show assumption log (debug)", value=False)
 
-# ... later, replace your current Assumption log block with:
 if show_log:
     st.subheader("Assumption log")
     st.json({
@@ -400,6 +398,7 @@ if show_log:
         "scenario": scenario,
         "include_recoveries_in_wal": include_recoveries_in_wal,
     })
+
 
 
 
