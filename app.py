@@ -368,7 +368,7 @@ def compute_drawdowns(port_df: pd.DataFrame, reinv_months: int, fac_rate_annual:
     return pd.DataFrame(rows)
 
 # ---------- NAV ----------
-st.caption("Navigate: **Overview** → **Portfolio Cashflows** → **Waterfalls** → **Drawdowns** → **Tables & Export**.")
+
 tab_overview, tab_cash, tab_wf, tab_draw, tab_tables = st.tabs(
     ["📊 Overview", "💵 Portfolio Cashflows", "🧱 Waterfalls", "💳 Drawdowns", "📑 Tables & Export"]
 )
@@ -391,40 +391,6 @@ with tab_overview:
     with rr1: st.metric("Avg CPR (realized, annual)", f"{Avg_CPR_realized*100:.2f}%")
     with rr2: st.metric("Avg Default Rate (monthly)", f"{Avg_DefaultRate_m*100:.3f}%")
     with rr3: st.metric("Realized LGD", f"{Realized_LGD*100:.2f}%")
-
-    # Composition donut
-    st.markdown("### Cashflow composition (lifetime)")
-    comp_vals = {
-        "Interest": float(port["Interest"].sum()),
-        "Principal (Sched+Prepay)": float(port["SchedPrin"].sum() + port["Prepay"].sum()),
-        "Recoveries": float(port["Recoveries"].sum()),
-        "Servicing Fees (cost)": abs(float(port["Fees"].sum())),
-    }
-    pie_colors = [BLUE_900, BLUE_700, BLUE_300, GRAY_600]
-    pie_fig = go.Figure(go.Pie(
-        labels=list(comp_vals.keys()),
-        values=list(comp_vals.values()),
-        hole=0.55,
-        marker=dict(colors=pie_colors, line=dict(color=WHITE, width=1)),
-        sort=False
-    ))
-    pie_fig.update_traces(textposition="inside",
-                          textinfo="label+percent",
-                          hovertemplate="%{label}: €%{value:,.0f} (%{percent})<extra></extra>")
-    pie_fig.update_layout(showlegend=False, height=360,
-                          annotations=[dict(text="Total", x=0.5, y=0.5, font_size=14, showarrow=False)])
-    st.plotly_chart(apply_fig_theme(pie_fig), use_container_width=True)
-
-    # Mini paydown curve
-    st.markdown("### Paydown curve (mini)")
-    mini = go.Figure(go.Scatter(x=port["t"], y=port["End_Bal"], name="Ending Balance",
-                                mode="lines", line=dict(color=BLUE_700, width=3)))
-    mini.update_layout(height=240, margin=dict(t=40, b=40, l=60, r=30),
-                       xaxis_title="Month", yaxis_title="Amount",
-                       showlegend=False)
-    euro_axis(mini, "y", abbreviate=True)
-    mini.update_traces(hovertemplate="€%{y:,.0f}<extra></extra>")
-    st.plotly_chart(apply_fig_theme(mini), use_container_width=True)
 
 # ===== PORTFOLIO CASHFLOWS =====
 with tab_cash:
@@ -692,3 +658,4 @@ with tab_tables:
             reinv_default, rate_default, limit_default = scenario_defaults_for_drawdown(scenario, opening_pool, months)
             drawdf_tbl = compute_drawdowns(port, reinv_default, rate_default, limit_default)
         st.dataframe(drawdf_tbl, use_container_width=True, column_config=number_cols_config(drawdf_tbl, decimals=0))
+
