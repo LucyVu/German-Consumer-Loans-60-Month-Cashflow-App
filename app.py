@@ -6,6 +6,7 @@ Created on Wed Aug 27 23:52:46 2025
 import pandas as pd
 import numpy as np
 import streamlit as st
+import plotly.graph_objects as go
 
 st.set_page_config(page_title="Loan Portfolio Cash Flow Projection", layout="wide")
 st.title("Germany Loan Portfolio Cash Flow Projection")
@@ -274,6 +275,78 @@ st.dataframe(port.style.format("{:,.0f}"), use_container_width=True)
 st.subheader("Waterfall-ready ledger")
 st.dataframe(ledger.style.format("{:,.0f}"), use_container_width=True)
 
+# ---------- Single-month Cashflow Waterfall ----------
+st.subheader("Waterfall — Cashflow (select month)")
+
+if not port.empty:
+    sel_month = st.slider("Select month for cashflow waterfall", 1, int(port["t"].max()), 1)
+    row = port.loc[port["t"] == sel_month].iloc[0]
+
+    cf_fig = go.Figure(go.Waterfall(
+        name="cashflow",
+        orientation="v",
+        measure=["relative","relative","relative","relative","relative","total"],
+        x=["Gross Interest", "Servicing Fees", "Scheduled Principal", "Prepayments", "Recoveries", "Net Cashflow"],
+        y=[row["Interest"], -row["Fees"], row["SchedPrin"], row["Prepay"], row["Recoveries"], 0],
+        text=[f"{row['Interest']:,.0f}", f"{-row['Fees']:,.0f}", f"{row['SchedPrin']:,.0f}",
+              f"{row['Prepay']:,.0f}", f"{row['Recoveries']:,.0f}", f"{row['Cashflow']:,.0f}"],
+        textposition="outside"
+    ))
+    cf_fig.update_layout(
+        showlegend=False,
+        waterfallgap=0.2,
+        title=f"Month {sel_month}: Cashflow Breakdown"
+    )
+    st.plotly_chart(cf_fig, use_container_width=True)
+
+# ---------- Single-month Principal Roll-Forward Waterfall ----------
+st.subheader("Waterfall — Principal Roll-Forward (select month)")
+
+if not port.empty:
+    sel_month2 = st.slider("Select month for balance waterfall", 1, int(port["t"].max()), 1, key="bal_wf")
+    row2 = port.loc[port["t"] == sel_month2].iloc[0]
+
+    pr_fig = go.Figure(go.Waterfall(
+        name="principal",
+        orientation="v",
+        measure=["absolute","relative","relative","relative","total"],
+        x=["Beginning Balance", "Scheduled Principal", "Prepayments", "Defaults/Charge-offs", "Ending Balance"],
+        y=[row2["Beg_Bal"], -row2["SchedPrin"], -row2["Prepay"], -row2["DefaultPrin"], 0],
+        text=[f"{row2['Beg_Bal']:,.0f}", f"{-row2['SchedPrin']:,.0f}", f"{-row2['Prepay']:,.0f}",
+              f"{-row2['DefaultPrin']:,.0f}", f"{row2['End_Bal']:,.0f}"],
+        textposition="outside"
+    ))
+    pr_fig.update_layout(
+        showlegend=False,
+        waterfallgap=0.2,
+        title=f"Month {sel_month2}: Principal Roll-Forward"
+    )
+    st.plotly_chart(pr_fig, use_container_width=True)
+
+# ---------- Portfolio cashflow components (stacked bars) ----------
+st.subheader("Portfolio – Monthly Cashflow Components (stacked)")
+
+comp = pd.DataFrame({
+    "t": port["t"],
+    "Gross Interest": port["Interest"],
+    "Scheduled Principal": port["SchedPrin"],
+    "Prepayments": port["Prepay"],
+    "Recoveries": port["Recoveries"],
+    "Servicing Fees": -port["Fees"],   # negative to show below axis
+})
+
+stack_fig = go.Figure()
+for col in ["Gross Interest","Scheduled Principal","Prepayments","Recoveries","Servicing Fees"]:
+    stack_fig.add_trace(go.Bar(x=comp["t"], y=comp[col], name=col))
+
+stack_fig.update_layout(
+    barmode="relative",  # stacks positives and negatives around zero
+    xaxis_title="Month",
+    yaxis_title="Amount",
+    title="Monthly Cashflow Components",
+)
+st.plotly_chart(stack_fig, use_container_width=True)
+
 # ---------- Downloads ----------
 st.download_button(
     "Download portfolio CSV",
@@ -313,3 +386,4 @@ st.json({
     "scenario": scenario,
     "include_recoveries_in_wal": include_recoveries_in_wal,
 })
+
