@@ -248,16 +248,49 @@ NPV = float(port["PV"].sum())
 EndBal_last = float(port.loc[port["t"] == port["t"].max(), "End_Bal"].values[0]) if not port.empty else 0.0
 CumLoss = float(port["CumLoss"].iloc[-1]) if not port.empty else 0.0
 
-# --- light card styling for metrics ---
-st.markdown("""
+# ---------- Waterfall-ready ledger (dùng cho tab Tables) ----------
+ledger = pd.DataFrame({
+    "t": port["t"],
+    "Beg_Bal": port["Beg_Bal"],
+    "Gross_Interest": port["Interest"],
+    "Servicing_Fees": port["Fees"],
+    "Net_Interest_Available": port["Interest"] - port["Fees"],
+    "Scheduled_Principal": port["SchedPrin"],
+    "Prepayments": port["Prepay"],
+    "Principal_Collections": port["SchedPrin"] + port["Prepay"],
+    "Defaults_ChargeOffs": port["DefaultPrin"],
+    "Recoveries": port["Recoveries"],
+    "Net_Principal_Available": (port["SchedPrin"] + port["Prepay"]) - port["DefaultPrin"] + port["Recoveries"],
+    "End_Bal": port["End_Bal"],
+    "Cashflow": port["Cashflow"],
+    "PV": port["PV"],
+    "CumLoss": port["CumLoss"],
+})
+
+# ---------- Theme & helpers ----------
+PRIMARY = "#2457F5"   # cobalt
+ACCENT  = "#12B886"   # teal
+DANGER  = "#EF4444"
+
+st.markdown(f"""
 <style>
-div[data-testid="stMetric"] > div {
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
-  padding: 12px 16px;
-  border-radius: 12px;
-}
-div[data-testid="stMetricValue"] { font-size: 2rem; }
+.stApp {{
+  background: linear-gradient(180deg,#0b1220 0%,#0b1220 60%,#101826 100%);
+  color:#e2e8f0;
+}}
+h1,h2,h3,h4 {{ color:#e6ecff; }}
+div[data-testid="stSidebar"] {{ background:#0f172a; color:#e2e8f0; }}
+/* metric cards */
+div[data-testid="stMetric"] > div {{
+  background:#0f172a; border:1px solid #1f2a44; padding:14px 18px; border-radius:14px;
+}}
+div[data-testid="stMetricLabel"] {{ color:#cbd5e1; }}
+div[data-testid="stMetricValue"] {{ color:#e6f0ff; font-weight:700; }}
+/* expander */
+summary {{ background:#0f172a; border:1px solid #1f2a44; padding:10px 12px; border-radius:10px; }}
+details[open] > summary {{ border-bottom:1px solid #1f2a44; }}
+/* tables */
+thead tr th {{ background:#0f172a !important; color:#cdd6f4 !important; }}
 </style>
 """, unsafe_allow_html=True)
 
@@ -270,343 +303,271 @@ def fmt_compact_money(x: float, symbol: str = "€") -> str:
     else:         val = f"{n:,.0f}"
     return f"{sign}{symbol}{val}"
 
-# Pre-format values
+def apply_fig_theme(fig: go.Figure) -> go.Figure:
+    fig.update_layout(
+        template="plotly_dark",
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#e6ecff"),
+    )
+    return fig
+
+# Pre-format KPI strings
 NPV_str     = fmt_compact_money(NPV)
 CumLoss_str = fmt_compact_money(CumLoss)
 EndBal_str  = fmt_compact_money(EndBal_last)
 WAL_str     = f"{WAL_years:.2f}"
 Pool_str    = f"{PoolLife_years:.2f}"
 
-# ---- Row 1 (3 metrics) ----
-r1c1, r1c2, r1c3 = st.columns(3)
-with r1c1: st.metric("NPV", NPV_str)
-with r1c2: st.metric("WAL (cash, yrs)", WAL_str)
-with r1c3: st.metric("Pool Life (yrs)", Pool_str)
+# ---------- TOP-LEVEL NAV ----------
+tab_overview, tab_wf, tab_draw, tab_tables = st.tabs(
+    ["📊 Overview", "🧱 Waterfalls", "💳 Drawdowns", "📑 Tables & Export"]
+)
 
-# ---- Row 2 (2 metrics) ----
-r2c1, r2c2 = st.columns(2)
-with r2c1: st.metric("Cumulative Loss", CumLoss_str)
-with r2c2: st.metric(f"End Balance (m{months})", EndBal_str)
+# =========================
+# Tab 1: OVERVIEW
+# =========================
+with tab_overview:
+    st.markdown("### Key performance")
+    r1c1, r1c2, r1c3 = st.columns(3)
+    with r1c1: st.metric("NPV", NPV_str)
+    with r1c2: st.metric("WAL (cash, yrs)", WAL_str)
+    with r1c3: st.metric("Pool Life (yrs)", Pool_str)
 
-# ---- Tiny UI tightening (KPI cards) ----
+    r2c1, r2c2 = st.columns(2)
+    with r2c1: st.metric("Cumulative Loss", CumLoss_str)
+    with r2c2: st.metric(f"End Balance (m{months})", EndBal_str)
+    st.markdown("<div style='margin-top:-12px'></div>", unsafe_allow_html=True)
 
-st.markdown("<div style='margin-top:-10px'></div>", unsafe_allow_html=True)
-
-# ---------- Single-month Cashflow Waterfall ----------
-st.subheader("Waterfall — Cashflow (select month)")
-
-if not port.empty:
-    sel_month = st.slider("Select month for cashflow waterfall", 1, int(port["t"].max()), 1)
-    row = port.loc[port["t"] == sel_month].iloc[0]
-
-    cf_fig = go.Figure(go.Waterfall(
-        name="cashflow",
-        orientation="v",
-        measure=["relative","relative","relative","relative","relative","total"],
-        x=["Gross Interest", "Servicing Fees", "Scheduled Principal", "Prepayments", "Recoveries", "Net Cashflow"],
-        y=[row["Interest"], -row["Fees"], row["SchedPrin"], row["Prepay"], row["Recoveries"], 0],
-        text=[f"{row['Interest']:,.0f}", f"{-row['Fees']:,.0f}", f"{row['SchedPrin']:,.0f}",
-              f"{row['Prepay']:,.0f}", f"{row['Recoveries']:,.0f}", f"{row['Cashflow']:,.0f}"],
-        textposition="outside"
-    ))
-    cf_fig.update_layout(
-        showlegend=False,
-        waterfallgap=0.2,
-        title=f"Month {sel_month}: Cashflow Breakdown"
+    # Stacked monthly components
+    st.markdown("### Portfolio – Monthly cashflow components")
+    comp = pd.DataFrame({
+        "t": port["t"],
+        "Gross Interest": port["Interest"],
+        "Scheduled Principal": port["SchedPrin"],
+        "Prepayments": port["Prepay"],
+        "Recoveries": port["Recoveries"],
+        "Servicing Fees": -port["Fees"],
+    })
+    stack_fig = go.Figure()
+    for col in ["Gross Interest","Scheduled Principal","Prepayments","Recoveries","Servicing Fees"]:
+        stack_fig.add_trace(go.Bar(x=comp["t"], y=comp[col], name=col))
+    stack_fig.update_layout(
+        barmode="relative",
+        xaxis_title="Month",
+        yaxis_title="Amount",
+        title="Monthly Cashflow Components",
     )
-    st.plotly_chart(cf_fig, use_container_width=True)
+    st.plotly_chart(apply_fig_theme(stack_fig), use_container_width=True)
 
-# ---------- Single-month Principal Roll-Forward Waterfall ----------
-st.subheader("Waterfall — Principal Roll-Forward (select month)")
-
-if not port.empty:
-    sel_month2 = st.slider("Select month for balance waterfall", 1, int(port["t"].max()), 1, key="bal_wf")
-    row2 = port.loc[port["t"] == sel_month2].iloc[0]
-
-    pr_fig = go.Figure(go.Waterfall(
-        name="principal",
-        orientation="v",
-        measure=["absolute","relative","relative","relative","total"],
-        x=["Beginning Balance", "Scheduled Principal", "Prepayments", "Defaults/Charge-offs", "Ending Balance"],
-        y=[row2["Beg_Bal"], -row2["SchedPrin"], -row2["Prepay"], -row2["DefaultPrin"], 0],
-        text=[f"{row2['Beg_Bal']:,.0f}", f"{-row2['SchedPrin']:,.0f}", f"{-row2['Prepay']:,.0f}",
-              f"{-row2['DefaultPrin']:,.0f}", f"{row2['End_Bal']:,.0f}"],
-        textposition="outside"
-    ))
-    pr_fig.update_layout(
-        showlegend=False,
-        waterfallgap=0.2,
-        title=f"Month {sel_month2}: Principal Roll-Forward"
-    )
-    st.plotly_chart(pr_fig, use_container_width=True)
-
-# ---------- Portfolio cashflow components (stacked bars) ----------
-st.subheader("Portfolio – Monthly Cashflow Components (stacked)")
-
-comp = pd.DataFrame({
-    "t": port["t"],
-    "Gross Interest": port["Interest"],
-    "Scheduled Principal": port["SchedPrin"],
-    "Prepayments": port["Prepay"],
-    "Recoveries": port["Recoveries"],
-    "Servicing Fees": -port["Fees"],   # negative to show below axis
-})
-
-stack_fig = go.Figure()
-for col in ["Gross Interest","Scheduled Principal","Prepayments","Recoveries","Servicing Fees"]:
-    stack_fig.add_trace(go.Bar(x=comp["t"], y=comp[col], name=col))
-
-stack_fig.update_layout(
-    barmode="relative",  # stacks positives and negatives around zero
-    xaxis_title="Month",
-    yaxis_title="Amount",
-    title="Monthly Cashflow Components",
-)
-st.plotly_chart(stack_fig, use_container_width=True)
-
-# ---------- Sidebar controls for drawdowns ----------
-# ---------- Drawdown simulation (optional) ----------
-st.sidebar.header("Drawdown simulation (optional)")
-enable_draw = st.sidebar.checkbox("Enable drawdown view", value=True)
-reinv_months = st.sidebar.number_input(
-    "Reinvestment period (months)",
-    min_value=0, max_value=int(months), value=min(18, int(months)), step=1
-)
-fac_rate_annual = st.sidebar.number_input(
-    "Facility interest (annual)", value=0.06, min_value=0.0, step=0.01, format="%.4f"
-)
-fac_limit = st.sidebar.number_input(
-    "Facility limit (0 = unlimited)", value=0.0, min_value=0.0, step=10000.0,
-    help="Set 0 for no limit"
-)
-
-# --- Make drawdown params follow the scenario (after fac_limit is set) ---
-link_drawdown_to_scenario = st.sidebar.checkbox(
-    "Auto-stress facility with scenario", value=True,
-    help="If on, facility rate / reinvestment window (and optional cap) move with the Base/Downside/Upside selection."
-)
-
-if link_drawdown_to_scenario:
-    # You already computed 'port' above, so its first Beg_Bal is available
-    opening_pool = float(port["Beg_Bal"].iloc[0]) if not port.empty else 0.0
-
-    if scenario == "Downside":
-        # tighter & more expensive funding; shorter reinvestment; optional cap
-        fac_rate_annual = max(fac_rate_annual, 0.075)   # +150 bps stress
-        reinv_months    = min(reinv_months, 9)          # stop reinvesting earlier
-        if fac_limit == 0.0:                             # only if user didn't set a limit
-            fac_limit = 0.85 * opening_pool             # ~85% advance as an example
-
-    elif scenario == "Upside":
-        # cheaper funding; allow longer reinvestment
-        fac_rate_annual = min(fac_rate_annual, 0.050)   # ~5%
-        reinv_months    = min(reinv_months, 24)
-
-    else:  # Base
-        fac_rate_annual = max(fac_rate_annual, 0.060)   # ~6%
-        reinv_months    = min(reinv_months, 18)
-
-# ---------- Drawdown engine (revolver-style) ----------
-if enable_draw:
-    st.subheader("Drawdowns / Revolver (illustrative)")
-
-    # Keep pool flat during reinvestment: purchases = run-off
-    required_purchases = port["Beg_Bal"] - port["End_Bal"]  # equals Sched + Prepay + DefaultPrin
-
-    # Cash you actually have for purchases (compute directly from 'port')
-    # NPA = (Scheduled + Prepay) - Defaults + Recoveries
-    npa = (port["SchedPrin"] + port["Prepay"]) - port["DefaultPrin"] + port["Recoveries"]
-
-    # Net interest available = Interest - Fees
-    net_int_avail = port["Interest"] - port["Fees"]
-
-    fac_rate_m = fac_rate_annual / 12.0
-
-    rows = []
-    fac_beg = 0.0
-    cum_draw = 0.0
-    cum_repay = 0.0
-
-    for i in range(len(port)):
-        t = int(port.loc[i, "t"])
-        req = float(required_purchases.iloc[i])
-        npa_t = float(npa.iloc[i])
-        nia_t = float(net_int_avail.iloc[i])
-
-        # Interest on current facility (paid from net interest; not capitalized)
-        fac_interest = fac_beg * fac_rate_m
-
-        # If we don't have enough principal cash to meet purchases, draw; otherwise repay
-        shortfall = req - npa_t
-        draw = 0.0
-        repay = 0.0
-
-        if t <= reinv_months:
-            # Reinvestment: buy assets to keep balance flat
-            if shortfall > 1e-9:
-                draw = shortfall
-                if fac_limit > 0.0:
-                    draw = max(0.0, min(draw, fac_limit - fac_beg))
-            elif shortfall < -1e-9:
-                repay = min(-shortfall, fac_beg)
-        else:
-            # Amortisation: no new purchases; use NPA to repay
-            repay = min(max(0.0, npa_t), fac_beg)
-
-        # Pay facility interest from net interest available
-        interest_shortfall = max(0.0, fac_interest - nia_t)
-
-        fac_end = fac_beg + draw - repay
-        cum_draw += draw
-        cum_repay += repay
-
-        rows.append({
-            "t": t,
-            "Beg_Facility": fac_beg,
-            "Required_Purchases": req,
-            "NPA": npa_t,
-            "Shortfall(+)/Excess(-)": shortfall,
-            "Draw": draw,
-            "Repay": repay,
-            "End_Facility": fac_end,
-            "Facility_Interest_Paid": fac_interest,
-            "Net_Interest_Available": nia_t,
-            "Interest_Shortfall": interest_shortfall,
-            "Cum_Draws": cum_draw,
-            "Cum_Repays": cum_repay,
+    # Assumptions snapshot (ẩn/hiện)
+    with st.expander("Assumptions snapshot (optional)", expanded=False):
+        st.json({
+            "pd_unit": pd_unit,
+            "CPR_annual": CPR_annual,
+            "SMM_base": SMM_base,
+            "CPR_multiplier": CPR_multiplier,
+            "SMM_eff": SMM_eff,
+            "servicing_bps": servicing_bps,
+            "fee_monthly": (servicing_bps/10000)/12,
+            "discount_annual": disc_rate,
+            "discount_monthly": d_m,
+            "recovery_lag_m": recovery_lag_m,
+            "PD_multiplier": PD_multiplier,
+            "LGD_shift": LGD_shift,
+            "months": months,
+            "scenario": scenario,
+            "include_recoveries_in_wal": include_recoveries_in_wal,
         })
 
-        fac_beg = fac_end
+# =========================
+# Tab 2: WATERFALLS
+# =========================
+with tab_wf:
+    st.markdown("### Select a month to visualize")
+    sel_month = st.slider("Month", 1, int(port["t"].max()), 1, key="wf_sel")
+    row = port.loc[port["t"] == sel_month].iloc[0]
 
-    drawdf = pd.DataFrame(rows)
-    st.dataframe(drawdf.style.format("{:,.0f}"), use_container_width=True)
+    c1, c2 = st.columns(2)
 
-    # KPIs
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Max Facility Balance", f"{drawdf['End_Facility'].max():,.0f}")
-    c2.metric("Final Facility Balance", f"{drawdf['End_Facility'].iloc[-1]:,.0f}")
-    c3.metric("Total Facility Interest Paid", f"{drawdf['Facility_Interest_Paid'].sum():,.0f}")
+    with c1:
+        st.markdown("**Cashflow waterfall**")
+        cf_fig = go.Figure(go.Waterfall(
+            name="cashflow", orientation="v",
+            measure=["relative","relative","relative","relative","relative","total"],
+            x=["Gross Interest","Servicing Fees","Scheduled Principal","Prepayments","Recoveries","Net Cashflow"],
+            y=[row["Interest"], -row["Fees"], row["SchedPrin"], row["Prepay"], row["Recoveries"], 0],
+            text=[f"{row['Interest']:,.0f}", f"{-row['Fees']:,.0f}",
+                  f"{row['SchedPrin']:,.0f}", f"{row['Prepay']:,.0f}",
+                  f"{row['Recoveries']:,.0f}", f"{row['Cashflow']:,.0f}"],
+            textposition="outside",
+        ))
+        cf_fig.update_layout(title=f"Month {sel_month}: Cashflow Breakdown", showlegend=False, waterfallgap=0.2)
+        st.plotly_chart(apply_fig_theme(cf_fig), use_container_width=True)
 
-    # Charts
-    # 1) Facility balance
-    fac_line = go.Figure(go.Scatter(x=drawdf["t"], y=drawdf["End_Facility"],
-                                    mode="lines+markers", name="Facility Balance"))
-    fac_line.update_layout(title="Facility Balance over time", xaxis_title="Month", yaxis_title="Balance")
-    st.plotly_chart(fac_line, use_container_width=True)
+    with c2:
+        st.markdown("**Principal roll-forward**")
+        pr_fig = go.Figure(go.Waterfall(
+            name="principal", orientation="v",
+            measure=["absolute","relative","relative","relative","total"],
+            x=["Beginning Balance","Scheduled Principal","Prepayments","Defaults/Charge-offs","Ending Balance"],
+            y=[row["Beg_Bal"], -row["SchedPrin"], -row["Prepay"], -row["DefaultPrin"], 0],
+            text=[f"{row['Beg_Bal']:,.0f}", f"{-row['SchedPrin']:,.0f}",
+                  f"{-row['Prepay']:,.0f}", f"{-row['DefaultPrin']:,.0f}", f"{row['End_Bal']:,.0f}"],
+            textposition="outside",
+        ))
+        pr_fig.update_layout(title=f"Month {sel_month}: Principal Roll-Forward", showlegend=False, waterfallgap=0.2)
+        st.plotly_chart(apply_fig_theme(pr_fig), use_container_width=True)
 
-    # 2) Draws vs Repayments
-    dr = go.Figure()
-    dr.add_trace(go.Bar(x=drawdf["t"], y=drawdf["Draw"], name="Draws"))
-    dr.add_trace(go.Bar(x=drawdf["t"], y=-drawdf["Repay"], name="Repayments"))  # show repays below axis
-    dr.update_layout(barmode="relative", title="Monthly Draws and Repayments",
-                     xaxis_title="Month", yaxis_title="Amount")
-    st.plotly_chart(dr, use_container_width=True)
+# =========================
+# Tab 3: DRAWDOWNS / REVOLVER
+# =========================
+with tab_draw:
+    st.markdown("### Drawdowns / Revolver (illustrative)")
+    with st.expander("Parameters", expanded=False):
+        enable_draw = st.checkbox("Enable drawdown view", value=True)
+        reinv_months = st.number_input("Reinvestment period (months)",
+                                       min_value=0, max_value=int(months),
+                                       value=min(18, int(months)), step=1)
+        fac_rate_annual = st.number_input("Facility interest (annual)",
+                                          value=0.06, min_value=0.0, step=0.01, format="%.4f")
+        fac_limit = st.number_input("Facility limit (0 = unlimited)", value=0.0, min_value=0.0, step=10000.0,
+                                    help="Set 0 for no limit")
+        link_drawdown_to_scenario = st.checkbox(
+            "Auto-stress with scenario", value=True,
+            help="Facility rate / reinvestment window (and optional cap) follow Base/Downside/Upside."
+        )
 
-    # 3) Interest coverage
-    cov = go.Figure()
-    cov.add_trace(go.Bar(x=drawdf["t"], y=drawdf["Net_Interest_Available"], name="Net Interest Available"))
-    cov.add_trace(go.Bar(x=drawdf["t"], y=-drawdf["Facility_Interest_Paid"], name="Facility Interest"))
-    cov.add_trace(go.Bar(x=drawdf["t"], y=-drawdf["Interest_Shortfall"], name="Interest Shortfall"))
-    cov.update_layout(barmode="relative", title="Interest Coverage",
-                      xaxis_title="Month", yaxis_title="Amount")
-    st.plotly_chart(cov, use_container_width=True)
+    if enable_draw:
+        # Make drawdown params follow the scenario
+        if link_drawdown_to_scenario:
+            opening_pool = float(port["Beg_Bal"].iloc[0]) if not port.empty else 0.0
+            if scenario == "Downside":
+                fac_rate_annual = max(fac_rate_annual, 0.075)
+                reinv_months    = min(reinv_months, 9)
+                if fac_limit == 0.0:
+                    fac_limit = 0.85 * opening_pool
+            elif scenario == "Upside":
+                fac_rate_annual = min(fac_rate_annual, 0.050)
+                reinv_months    = min(reinv_months, 24)
+            else:
+                fac_rate_annual = max(fac_rate_annual, 0.060)
+                reinv_months    = min(reinv_months, 18)
 
-    # Download schedule
+        # Purchases = run-off to keep pool flat during reinvestment
+        required_purchases = port["Beg_Bal"] - port["End_Bal"]
+        npa = (port["SchedPrin"] + port["Prepay"]) - port["DefaultPrin"] + port["Recoveries"]
+        net_int_avail = port["Interest"] - port["Fees"]
+        fac_rate_m = fac_rate_annual / 12.0
+
+        rows, fac_beg, cum_draw, cum_repay = [], 0.0, 0.0, 0.0
+        for i in range(len(port)):
+            t = int(port.loc[i, "t"])
+            req = float(required_purchases.iloc[i])
+            npa_t = float(npa.iloc[i])
+            nia_t = float(net_int_avail.iloc[i])
+
+            fac_interest = fac_beg * fac_rate_m
+            shortfall = req - npa_t
+            draw = repay = 0.0
+
+            if t <= reinv_months:
+                if shortfall > 1e-9:
+                    draw = shortfall
+                    if fac_limit > 0.0:
+                        draw = max(0.0, min(draw, fac_limit - fac_beg))
+                elif shortfall < -1e-9:
+                    repay = min(-shortfall, fac_beg)
+            else:
+                repay = min(max(0.0, npa_t), fac_beg)
+
+            interest_shortfall = max(0.0, fac_interest - nia_t)
+
+            fac_end = fac_beg + draw - repay
+            cum_draw += draw; cum_repay += repay
+
+            rows.append({
+                "t": t, "Beg_Facility": fac_beg, "Required_Purchases": req, "NPA": npa_t,
+                "Shortfall(+)/Excess(-)": shortfall, "Draw": draw, "Repay": repay, "End_Facility": fac_end,
+                "Facility_Interest_Paid": fac_interest, "Net_Interest_Available": nia_t,
+                "Interest_Shortfall": interest_shortfall, "Cum_Draws": cum_draw, "Cum_Repays": cum_repay,
+            })
+            fac_beg = fac_end
+
+        drawdf = pd.DataFrame(rows)
+
+        kc1, kc2, kc3 = st.columns(3)
+        kc1.metric("Max Facility Balance", f"{drawdf['End_Facility'].max():,.0f}")
+        kc2.metric("Final Facility Balance", f"{drawdf['End_Facility'].iloc[-1]:,.0f}")
+        kc3.metric("Total Facility Interest Paid", f"{drawdf['Facility_Interest_Paid'].sum():,.0f}")
+
+        # Charts
+        fac_line = go.Figure(go.Scatter(x=drawdf["t"], y=drawdf["End_Facility"],
+                                        mode="lines+markers", name="Facility Balance"))
+        fac_line.update_layout(title="Facility Balance over time", xaxis_title="Month", yaxis_title="Balance")
+        st.plotly_chart(apply_fig_theme(fac_line), use_container_width=True)
+
+        dr = go.Figure()
+        dr.add_trace(go.Bar(x=drawdf["t"], y=drawdf["Draw"], name="Draws"))
+        dr.add_trace(go.Bar(x=drawdf["t"], y=-drawdf["Repay"], name="Repayments"))
+        dr.update_layout(barmode="relative", title="Monthly Draws and Repayments",
+                         xaxis_title="Month", yaxis_title="Amount")
+        st.plotly_chart(apply_fig_theme(dr), use_container_width=True)
+
+        cov = go.Figure()
+        cov.add_trace(go.Bar(x=drawdf["t"], y=drawdf["Net_Interest_Available"], name="Net Interest Available"))
+        cov.add_trace(go.Bar(x=drawdf["t"], y=-drawdf["Facility_Interest_Paid"], name="Facility Interest"))
+        cov.add_trace(go.Bar(x=drawdf["t"], y=-drawdf["Interest_Shortfall"], name="Interest Shortfall"))
+        cov.update_layout(barmode="relative", title="Interest Coverage",
+                          xaxis_title="Month", yaxis_title="Amount")
+        st.plotly_chart(apply_fig_theme(cov), use_container_width=True)
+
+        with st.expander("Drawdown schedule (table)"):
+            st.dataframe(drawdf.style.format("{:,.0f}"), use_container_width=True)
+            st.download_button(
+                "Download drawdown schedule CSV",
+                drawdf.to_csv(index=False).encode("utf-8"),
+                file_name="drawdown_schedule.csv",
+                mime="text/csv",
+            )
+
+# =========================
+# Tab 4: TABLES & EXPORT
+# =========================
+with tab_tables:
+    with st.expander("Portfolio cashflows (monthly)", expanded=False):
+        st.dataframe(port.style.format("{:,.0f}"), use_container_width=True)
+
+    with st.expander("Waterfall-ready ledger", expanded=False):
+        st.dataframe(ledger.style.format("{:,.0f}"), use_container_width=True)
+
+    with st.expander("Loan-level cashflows", expanded=False):
+        st.dataframe(cf.style.format("{:,.0f}"), use_container_width=True)
+
+    # One-click Excel + CSVs
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        port.to_excel(xw, index=False, sheet_name="portfolio")
+        ledger.to_excel(xw, index=False, sheet_name="ledger")
+        cf.to_excel(xw, index=False, sheet_name="loan_level")
     st.download_button(
-        "Download drawdown schedule CSV",
-        drawdf.to_csv(index=False).encode("utf-8"),
-        file_name="drawdown_schedule.csv",
-        mime="text/csv",
+        "⬇️ Download XLSX (portfolio, ledger, loan-level)",
+        data=buf.getvalue(),
+        file_name="cashflows.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
     )
 
-# ---------- Waterfall-ready ledger ----------
-ledger = pd.DataFrame({
-    "t": port["t"],
-    "Beg_Bal": port["Beg_Bal"],
-    # Interest side
-    "Gross_Interest": port["Interest"],
-    "Servicing_Fees": port["Fees"],
-    "Net_Interest_Available": port["Interest"] - port["Fees"],
-    # Principal side
-    "Scheduled_Principal": port["SchedPrin"],
-    "Prepayments": port["Prepay"],
-    "Principal_Collections": port["SchedPrin"] + port["Prepay"],
-    "Defaults_ChargeOffs": port["DefaultPrin"],
-    "Recoveries": port["Recoveries"],
-    "Net_Principal_Available": (port["SchedPrin"] + port["Prepay"]) - port["DefaultPrin"] + port["Recoveries"],
-    # Roll-forward & valuation
-    "End_Bal": port["End_Bal"],
-    "Cashflow": port["Cashflow"],
-    "PV": port["PV"],
-    "CumLoss": port["CumLoss"],
-})
-
-st.subheader("Portfolio cashflows (monthly)")
-st.dataframe(port.style.format("{:,.0f}"), use_container_width=True)
-
-st.subheader("Waterfall-ready ledger")
-st.dataframe(ledger.style.format("{:,.0f}"), use_container_width=True)
-
-# ---------- One-click Excel download ----------
-buf = io.BytesIO()
-with pd.ExcelWriter(buf, engine="openpyxl") as xw:
-    port.to_excel(xw, index=False, sheet_name="portfolio")
-    ledger.to_excel(xw, index=False, sheet_name="ledger")
-    cf.to_excel(xw, index=False, sheet_name="loan_level")
-st.download_button(
-    "Download XLSX (portfolio, ledger, loan-level)",
-    data=buf.getvalue(),
-    file_name="cashflows.xlsx",
-    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-)
-
-# ---------- Downloads ----------
-st.download_button(
-    "Download portfolio CSV",
-    port.to_csv(index=False).encode("utf-8"),
-    file_name="portfolio_cashflows.csv",
-    mime="text/csv",
-)
-st.download_button(
-    "Download loan-level CSV (Base)",
-    cf.to_csv(index=False).encode("utf-8"),
-    file_name="loanlevel_cashflows.csv",
-    mime="text/csv",
-)
-st.download_button(
-    "Download waterfall ledger CSV",
-    ledger.to_csv(index=False).encode("utf-8"),
-    file_name="waterfall_feed.csv",
-    mime="text/csv",
-)
-
-# ---------- Assumption log ----------
-show_log = st.sidebar.checkbox("Show assumption log (debug)", value=False)
-
-if show_log:
-    st.subheader("Assumption log")
-    st.json({
-        "pd_unit": pd_unit,
-        "CPR_annual": CPR_annual,
-        "SMM_base": SMM_base,
-        "CPR_multiplier": CPR_multiplier,
-        "SMM_eff": SMM_eff,
-        "servicing_bps": servicing_bps,
-        "fee_monthly": fee_m,
-        "discount_annual": disc_rate,
-        "discount_monthly": d_m,
-        "recovery_lag_m": recovery_lag_m,
-        "PD_multiplier": PD_multiplier,
-        "LGD_shift": LGD_shift,
-        "months": months,
-        "scenario": scenario,
-        "include_recoveries_in_wal": include_recoveries_in_wal,
-    })
-
-
-
-
-
+    c_dl1, c_dl2, c_dl3 = st.columns(3)
+    with c_dl1:
+        st.download_button("CSV — portfolio", port.to_csv(index=False).encode("utf-8"),
+                           file_name="portfolio_cashflows.csv", mime="text/csv", use_container_width=True)
+    with c_dl2:
+        st.download_button("CSV — loan-level", cf.to_csv(index=False).encode("utf-8"),
+                           file_name="loanlevel_cashflows.csv", mime="text/csv", use_container_width=True)
+    with c_dl3:
+        st.download_button("CSV — ledger", ledger.to_csv(index=False).encode("utf-8"),
+                           file_name="waterfall_feed.csv", mime="text/csv", use_container_width=True)
 
 
 
