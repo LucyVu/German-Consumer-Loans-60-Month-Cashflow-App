@@ -368,7 +368,6 @@ def compute_drawdowns(port_df: pd.DataFrame, reinv_months: int, fac_rate_annual:
     return pd.DataFrame(rows)
 
 # ---------- NAV ----------
-
 tab_overview, tab_cash, tab_wf, tab_draw, tab_tables = st.tabs(
     ["📊 Overview", "💵 Portfolio Cashflows", "🧱 Waterfalls", "💳 Drawdowns", "📑 Tables & Export"]
 )
@@ -658,4 +657,5 @@ with tab_tables:
             reinv_default, rate_default, limit_default = scenario_defaults_for_drawdown(scenario, opening_pool, months)
             drawdf_tbl = compute_drawdowns(port, reinv_default, rate_default, limit_default)
         st.dataframe(drawdf_tbl, use_container_width=True, column_config=number_cols_config(drawdf_tbl, decimals=0))
+
 
