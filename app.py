@@ -227,31 +227,65 @@ port = cf.groupby("t", as_index=False).agg({
 port["CumLoss"] = port["Loss"].cumsum()
 
 # ---------- KPIs ----------
-# WAL (cash) — exclude defaults; optionally include recoveries if you tick the box
+# WAL (cash) — exclude defaults; optionally include recoveries
 principal_cash = port["SchedPrin"] + port["Prepay"]
 if include_recoveries_in_wal:
     principal_cash = principal_cash + port["Recoveries"]
 
 total_principal_cash = principal_cash.sum()
-WAL_years = 0.0 if total_principal_cash == 0 else \
-    float((port["t"] * principal_cash).sum() / total_principal_cash / 12.0)
+WAL_years = 0.0 if total_principal_cash == 0 else float(
+    (port["t"] * principal_cash).sum() / total_principal_cash / 12.0
+)
 
 # Pool Life (includes defaults as balance runoff; NOT a cash metric)
 pool_runoff = port["SchedPrin"] + port["Prepay"] + port["DefaultPrin"]
-PoolLife_years = 0.0 if pool_runoff.sum() == 0 else \
-    float((port["t"] * pool_runoff).sum() / pool_runoff.sum() / 12.0)
+PoolLife_years = 0.0 if pool_runoff.sum() == 0 else float(
+    (port["t"] * pool_runoff).sum() / pool_runoff.sum() / 12.0
+)
 
 NPV = float(port["PV"].sum())
 EndBal_last = float(port.loc[port["t"] == port["t"].max(), "End_Bal"].values[0]) if not port.empty else 0.0
 CumLoss = float(port["CumLoss"].iloc[-1]) if not port.empty else 0.0
 
-k1, k2, k3, k4, k5 = st.columns(5)
-k1.metric("NPV", f"{NPV:,.0f}")
-k2.metric("WAL (cash, yrs)", f"{WAL_years:,.2f}")
-k3.metric("Pool Life (yrs)", f"{PoolLife_years:,.2f}")
-k4.metric("Cumulative Loss", f"{CumLoss:,.0f}")
-k5.metric(f"End Balance (m{months})", f"{EndBal_last:,.0f}")
+# --- light card styling for metrics ---
+st.markdown("""
+<style>
+div[data-testid="stMetric"] > div {
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  padding: 12px 16px;
+  border-radius: 12px;
+}
+div[data-testid="stMetricValue"] { font-size: 2rem; }
+</style>
+""", unsafe_allow_html=True)
 
+def fmt_compact_money(x: float, symbol: str = "€") -> str:
+    sign = "-" if x < 0 else ""
+    n = abs(x)
+    if n >= 1e9:  val = f"{n/1e9:.2f}bn"
+    elif n >= 1e6: val = f"{n/1e6:.2f}m"
+    elif n >= 1e3: val = f"{n/1e3:.0f}k"
+    else:         val = f"{n:,.0f}"
+    return f"{sign}{symbol}{val}"
+
+# Pre-format values
+NPV_str     = fmt_compact_money(NPV)
+CumLoss_str = fmt_compact_money(CumLoss)
+EndBal_str  = fmt_compact_money(EndBal_last)
+WAL_str     = f"{WAL_years:.2f}"
+Pool_str    = f"{PoolLife_years:.2f}"
+
+# ---- Row 1 (3 metrics) ----
+r1c1, r1c2, r1c3 = st.columns(3)
+with r1c1: st.metric("NPV", NPV_str)
+with r1c2: st.metric("WAL (cash, yrs)", WAL_str)
+with r1c3: st.metric("Pool Life (yrs)", Pool_str)
+
+# ---- Row 2 (2 metrics) ----
+r2c1, r2c2 = st.columns(2)
+with r2c1: st.metric("Cumulative Loss", CumLoss_str)
+with r2c2: st.metric(f"End Balance (m{months})", EndBal_str)
 # ---------- Single-month Cashflow Waterfall ----------
 st.subheader("Waterfall — Cashflow (select month)")
 
@@ -395,6 +429,7 @@ if show_log:
         "scenario": scenario,
         "include_recoveries_in_wal": include_recoveries_in_wal,
     })
+
 
 
 
