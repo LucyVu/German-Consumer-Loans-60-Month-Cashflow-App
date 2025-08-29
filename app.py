@@ -23,18 +23,60 @@ def cpr_to_smm(cpr: float) -> float:
     """Convert CPR (annual) to SMM (monthly)."""
     return 1 - (1 - cpr) ** (1/12)
 
+def annual_pd_to_monthly(pd_annual: float) -> float:
+    """Convert annual PD (0..1) to a monthly default probability."""
+    pd_annual = max(0.0, min(pd_annual, 1.0))
+    return 1 - (1 - pd_annual) ** (1/12)
+
+def read_loan_tape(path_or_buffer, sheet_name: str = "loan_tape") -> pd.DataFrame:
+    """
+    Read a loan tape from CSV or Excel. Uses openpyxl for .xlsx and shows
+    clear errors if dependency/sheet is missing.
+    """
+    name = getattr(path_or_buffer, "name", None)
+    path_str = str(path_or_buffer) if isinstance(path_or_buffer, str) else (name or "")
+
+    # CSV path or uploaded CSV buffer
+    if path_str.lower().endswith(".csv"):
+        return pd.read_csv(path_or_buffer)
+
+    # Excel path or uploaded Excel buffer
+    try:
+        return pd.read_excel(path_or_buffer, sheet_name=sheet_name, engine="openpyxl")
+    except ImportError:
+        st.error(
+            "Excel support requires the 'openpyxl' package.\n\n"
+            "Fix: add `openpyxl` to requirements.txt and redeploy, "
+            "or upload a CSV instead."
+        )
+        st.stop()
+    except FileNotFoundError:
+        st.error(f"File not found: {path_or_buffer}")
+        st.stop()
+    except ValueError as e:
+        st.error(f"{e}\nMake sure your Excel has a sheet named '{sheet_name}'.")
+        st.stop()
+
 # ---------- Sidebar: data & assumptions ----------
 st.sidebar.header("Data source")
-file = st.sidebar.file_uploader("Upload file", type=["xlsx", "csv"])
+file = st.sidebar.file_uploader("Upload data file", type=["xlsx", "csv"])
 use_sample = st.sidebar.checkbox("Use bundled sample file: 'loanslite for app.xlsx'", value=True)
 SAMPLE_PATH = "loanslite for app.xlsx"
+sheet_name = st.sidebar.text_input("Excel sheet name", value="loan_tape")
+
+st.sidebar.header("PD unit from tape")
+pd_unit = st.sidebar.radio(
+    "How is PD provided in the tape?",
+    ["Annual (convert to monthly)", "Monthly already"],
+    index=0
+)
 
 st.sidebar.header("Assumptions")
 CPR_annual = st.sidebar.number_input("CPR (annual)", value=0.08, min_value=0.0, step=0.01, format="%.4f")
 SMM_base = cpr_to_smm(CPR_annual)
 servicing_bps = st.sidebar.number_input("Servicing fee (bps/year)", value=50, min_value=0, step=5)
 disc_rate = st.sidebar.number_input("Discount rate (annual)", value=0.07, min_value=0.0, step=0.01, format="%.4f")
-recovery_lag_m = st.sidebar.number_input("Recovery lag (months)", value=12, min_value=0, step=1)  # 12 as a reasonable default
+recovery_lag_m = st.sidebar.number_input("Recovery lag (months)", value=12, min_value=0, step=1)
 months = st.sidebar.slider("Projection horizon (months)", 1, 60, 60)
 
 st.sidebar.header("Scenarios & Overrides")
@@ -42,8 +84,9 @@ scenario = st.sidebar.selectbox("Scenario", ["Base", "Downside", "Upside"])
 PD_multiplier = st.sidebar.number_input("PD multiplier (k)", value=1.0, step=0.1, format="%.2f")
 LGD_shift = st.sidebar.number_input("LGD shift (±Δ)", value=0.0, step=0.05, format="%.2f")
 CPR_multiplier = st.sidebar.number_input("CPR multiplier (m)", value=1.0, step=0.1, format="%.2f")
+include_recoveries_in_wal = st.sidebar.checkbox("Include Recoveries in WAL (optional)", value=False)
 
-# Apply preset scenario adjustments (tweak as you like)
+# Scenario presets
 if scenario == "Downside":
     PD_multiplier = max(PD_multiplier, 1.5)
     LGD_shift = max(LGD_shift, 0.10)
@@ -61,25 +104,20 @@ d_m = disc_rate / 12.0
 # ---------- Load data ----------
 loans = None
 if file is not None:
-    if file.name.lower().endswith(".csv"):
-        loans = pd.read_csv(file)
-    else:
-        loans = pd.read_excel(file, sheet_name="loan_tape")
+    loans = read_loan_tape(file, sheet_name=sheet_name)
 elif use_sample:
-    try:
-        loans = pd.read_excel(SAMPLE_PATH, sheet_name="loan_tape")
-    except FileNotFoundError:
-        st.error(
-            f"Sample file not found at '{SAMPLE_PATH}'. "
-            "Upload a loan tape or place the sample alongside app.py."
-        )
-        st.stop()
+    if os.path.exists(SAMPLE_PATH):
+        loans = read_loan_tape(SAMPLE_PATH, sheet_name=sheet_name)
+    else:
+        csv_path = os.path.splitext(SAMPLE_PATH)[0] + ".csv"
+        if os.path.exists(csv_path):
+            loans = pd.read_csv(csv_path)
 
 if loans is None:
-    st.info("Upload a loan tape (or tick 'Use bundled sample file') to run the model.")
+    st.info("Upload a loan tape or tick 'Use bundled sample file' to run the model.")
     st.stop()
 
-# Check required schema
+# Required schema
 required_cols = [
     "loan_id",
     "opening_balance",
@@ -110,57 +148,51 @@ def project_cashflows(loans_df: pd.DataFrame, horizon_months: int) -> pd.DataFra
         if pmt <= 0.0:
             pmt = annuity_payment(bal, r_m, rem_term)
 
-        pd_m = float(r["pd"]) * PD_multiplier
+        # ---- PD monthly (correct handling) ----
+        raw_pd = float(r["pd"])
+        if pd_unit.startswith("Annual"):
+            pd_m = annual_pd_to_monthly(raw_pd) * PD_multiplier
+        else:
+            pd_m = raw_pd * PD_multiplier
         pd_m = min(max(pd_m, 0.0), 1.0)
+
         lgd = min(max(float(r["lgd"]) + LGD_shift, 0.0), 1.0)
 
-        # bucket for delayed recoveries
+        # Delayed recoveries bucket
         recs = {}
         for t in range(1, horizon_months + 1):
             if bal < 1e-9:
-                # Only delayed recoveries may arrive after balance goes to zero
                 cash = recs.get(t, 0.0)
                 pv = cash / ((1 + d_m) ** t)
-                rows.append([
-                    t, loan_id, 0.0, 0.0, 0.0, 0.0, 0.0,
-                    recs.get(t, 0.0), 0.0, 0.0, cash, pv, 0.0
-                ])
+                rows.append([t, loan_id, 0.0, 0.0, 0.0, 0.0, 0.0,
+                             recs.get(t, 0.0), 0.0, 0.0, cash, pv, 0.0])
                 continue
 
             # 1) Interest
             interest = bal * r_m
-
             # 2) Scheduled principal
             sched_prin = max(0.0, min(bal, pmt - interest))
-
             # 3) Prepayment
             prepay_base = max(0.0, bal - sched_prin)
             prepay = prepay_base * SMM_eff
-
-            # 4) Default
+            # 4) Default (expected) on survivors after prepay
             default_base = max(0.0, prepay_base - prepay)
             def_prin = default_base * pd_m
-
-            # 5) Loss & Recovery
+            # 5) Loss & Recovery (recovery comes later)
             loss = def_prin * lgd
             rec_amount = def_prin * (1 - lgd)
             lag_month = int(recovery_lag_m)
             recs[t + lag_month] = recs.get(t + lag_month, 0.0) + rec_amount
-
-            # 6) Fees (on beginning balance)
+            # 6) Fees on beginning balance
             fees = bal * fee_m
-
             # 7) End balance
             end_bal = max(0.0, bal - sched_prin - prepay - def_prin)
-
-            # 8) Cashflow & PV
+            # 8) Cashflow (this month) & PV
             cash = interest + sched_prin + prepay + recs.get(t, 0.0) - fees
             pv = cash / ((1 + d_m) ** t)
 
-            rows.append([
-                t, loan_id, bal, interest, sched_prin, prepay, def_prin,
-                recs.get(t, 0.0), fees, end_bal, cash, pv, loss
-            ])
+            rows.append([t, loan_id, bal, interest, sched_prin, prepay, def_prin,
+                         recs.get(t, 0.0), fees, end_bal, cash, pv, loss])
 
             bal = end_bal
 
@@ -188,19 +220,31 @@ port = cf.groupby("t", as_index=False).agg({
 })
 port["CumLoss"] = port["Loss"].cumsum()
 
-# KPIs
-principal_flows = port["SchedPrin"] + port["Prepay"] + port["DefaultPrin"]
-total_principal = principal_flows.sum()
-WAL_years = 0.0 if total_principal == 0 else float((port["t"] * principal_flows).sum() / total_principal / 12.0)
+# ---------- KPIs ----------
+# WAL (cash) — exclude defaults; optionally include recoveries if you tick the box
+principal_cash = port["SchedPrin"] + port["Prepay"]
+if include_recoveries_in_wal:
+    principal_cash = principal_cash + port["Recoveries"]
+
+total_principal_cash = principal_cash.sum()
+WAL_years = 0.0 if total_principal_cash == 0 else \
+    float((port["t"] * principal_cash).sum() / total_principal_cash / 12.0)
+
+# Pool Life (includes defaults as balance runoff; NOT a cash metric)
+pool_runoff = port["SchedPrin"] + port["Prepay"] + port["DefaultPrin"]
+PoolLife_years = 0.0 if pool_runoff.sum() == 0 else \
+    float((port["t"] * pool_runoff).sum() / pool_runoff.sum() / 12.0)
+
 NPV = float(port["PV"].sum())
-EndBal_m60 = float(port.loc[port["t"] == port["t"].max(), "End_Bal"].values[0]) if not port.empty else 0.0
+EndBal_last = float(port.loc[port["t"] == port["t"].max(), "End_Bal"].values[0]) if not port.empty else 0.0
 CumLoss = float(port["CumLoss"].iloc[-1]) if not port.empty else 0.0
 
-k1, k2, k3, k4 = st.columns(4)
+k1, k2, k3, k4, k5 = st.columns(5)
 k1.metric("NPV", f"{NPV:,.0f}")
-k2.metric("WAL (yrs)", f"{WAL_years:,.2f}")
-k3.metric("Cumulative Loss", f"{CumLoss:,.0f}")
-k4.metric("End Balance (m60)", f"{EndBal_m60:,.0f}")
+k2.metric("WAL (cash, yrs)", f"{WAL_years:,.2f}")
+k3.metric("Pool Life (yrs)", f"{PoolLife_years:,.2f}")
+k4.metric("Cumulative Loss", f"{CumLoss:,.0f}")
+k5.metric(f"End Balance (m{months})", f"{EndBal_last:,.0f}")
 
 # ---------- Waterfall-ready ledger ----------
 ledger = pd.DataFrame({
@@ -253,6 +297,7 @@ st.download_button(
 # ---------- Assumption log ----------
 st.subheader("Assumption log")
 st.json({
+    "pd_unit": pd_unit,
     "CPR_annual": CPR_annual,
     "SMM_base": SMM_base,
     "CPR_multiplier": CPR_multiplier,
@@ -266,6 +311,5 @@ st.json({
     "LGD_shift": LGD_shift,
     "months": months,
     "scenario": scenario,
+    "include_recoveries_in_wal": include_recoveries_in_wal,
 })
-
-
