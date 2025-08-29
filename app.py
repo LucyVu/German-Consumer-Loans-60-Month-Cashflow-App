@@ -5,6 +5,7 @@ Created on Wed Aug 27 23:52:46 2025
 """
 import pandas as pd
 import numpy as np
+import os
 import streamlit as st
 import plotly.graph_objects as go
 
@@ -386,4 +387,5 @@ st.json({
     "scenario": scenario,
     "include_recoveries_in_wal": include_recoveries_in_wal,
 })
+
 
