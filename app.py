@@ -44,6 +44,37 @@ def read_loan_tape(path_or_buffer, sheet_name: str = "loan_tape") -> pd.DataFram
         st.error(f"{e}\nMake sure your Excel has a sheet named '{sheet_name}'.")
         st.stop()
 
+# --- PD unit heuristics & normalization (NEW) ---
+def _looks_like_percent(series: pd.Series) -> bool:
+    s = series.dropna().astype(float)
+    if s.empty:
+        return False
+    return s.quantile(0.95) > 1.0
+
+def _detect_pd_unit(series: pd.Series) -> str:
+    s = series.dropna().astype(float)
+    if s.empty:
+        return "Annual"
+    if _looks_like_percent(s):
+        return "Annual (percent)"
+    med = s.median()
+    p95 = s.quantile(0.95)
+    if 0.0001 <= med <= 0.02 and p95 < 0.20:
+        return "Monthly"
+    if 0.005 <= med <= 0.20:
+        return "Annual"
+    return "Annual"
+
+def _normalize_pd_to_monthly(raw_pd: pd.Series, unit_hint: str) -> pd.Series:
+    s = raw_pd.astype(float)
+    if unit_hint == "Annual (percent)":
+        s = s / 100.0
+        unit_hint = "Annual"
+    if unit_hint.startswith("Annual"):
+        return 1 - (1 - s).clip(0, 1) ** (1/12)
+    else:
+        return s.clip(0, 1)
+
 # ---------- Sidebar ----------
 st.sidebar.header("Data source")
 file = st.sidebar.file_uploader("Upload data file", type=["xlsx", "csv"])
@@ -51,9 +82,14 @@ use_sample = st.sidebar.checkbox("Use bundled sample file: 'loanslite for app.xl
 SAMPLE_PATH = "loanslite for app.xlsx"
 sheet_name = st.sidebar.text_input("Excel sheet name", value="loan_tape")
 
-st.sidebar.header("PD unit from tape")
-pd_unit = st.sidebar.radio("How is PD provided in the tape?",
-                           ["Annual (convert to monthly)", "Monthly already"], index=0)
+st.sidebar.header("PD in the tape")
+pd_unit_choice = st.sidebar.selectbox(
+    "What unit are PD values in?",
+    ["Auto-detect", "Annual PD (we’ll convert to monthly)", "Monthly PD (already monthly)"],
+    index=0,
+    help=("Auto tries to infer annual vs monthly and whether PDs are in percent (e.g., 2) "
+          "or proportion (e.g., 0.02). You can override here.")
+)
 
 st.sidebar.header("Assumptions")
 CPR_annual = st.sidebar.number_input("CPR (annual)", value=0.08, min_value=0.0, step=0.01, format="%.4f")
@@ -113,6 +149,21 @@ missing = [c for c in required_cols if c not in loans.columns]
 if missing:
     st.error(f"Missing required columns: {missing}")
     st.stop()
+
+# ---------- PD normalization to MONTHLY proportions (NEW) ----------
+loans_proc = loans.copy()
+if pd_unit_choice == "Auto-detect":
+    hint = _detect_pd_unit(loans_proc["pd"])
+elif pd_unit_choice.startswith("Annual"):
+    hint = "Annual"
+else:
+    hint = "Monthly"
+
+pd_monthly = _normalize_pd_to_monthly(loans_proc["pd"], hint)
+loans_proc["pd"] = pd_monthly.clip(0, 1)
+st.sidebar.caption(
+    f"PD normalization: **{hint} → monthly**. Median PD(m) = {float(pd_monthly.median()):.4%}"
+)
 
 # ---------- Theme ----------
 BLUE_900 = "#072F5F"
@@ -262,9 +313,18 @@ def project_cashflows_cached(loans_df_json: str, horizon_months: int, pd_unit: s
     df = pd.read_json(loans_df_json)
     return project_cashflows(df, horizon_months, pd_unit, PD_multiplier, LGD_shift, SMM_eff, fee_m, d_m, recovery_lag_m)
 
-cf = project_cashflows_cached(loans.to_json(), int(months), pd_unit,
-                              float(PD_multiplier), float(LGD_shift), float(SMM_eff),
-                              float(fee_m), float(d_m), int(recovery_lag_m))
+# Feed the engine with MONTHLY PDs (normalized above)
+cf = project_cashflows_cached(
+    loans_proc.to_json(),
+    int(months),
+    "Monthly already",
+    float(PD_multiplier),
+    float(LGD_shift),
+    float(SMM_eff),
+    float(fee_m),
+    float(d_m),
+    int(recovery_lag_m),
+)
 
 # ---------- Aggregation ----------
 port = cf.groupby("t", as_index=False).agg({
@@ -657,6 +717,3 @@ with tab_tables:
             reinv_default, rate_default, limit_default = scenario_defaults_for_drawdown(scenario, opening_pool, months)
             drawdf_tbl = compute_drawdowns(port, reinv_default, rate_default, limit_default)
         st.dataframe(drawdf_tbl, use_container_width=True, column_config=number_cols_config(drawdf_tbl, decimals=0))
-
-
-
