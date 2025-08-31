@@ -161,9 +161,6 @@ else:
 
 pd_monthly = _normalize_pd_to_monthly(loans_proc["pd"], hint)
 loans_proc["pd"] = pd_monthly.clip(0, 1)
-st.sidebar.caption(
-    f"PD normalization: **{hint} → monthly**. Median PD(m) = {float(pd_monthly.median()):.4%}"
-)
 
 # ---------- Theme ----------
 BLUE_900 = "#072F5F"
@@ -717,4 +714,5 @@ with tab_tables:
             reinv_default, rate_default, limit_default = scenario_defaults_for_drawdown(scenario, opening_pool, months)
             drawdf_tbl = compute_drawdowns(port, reinv_default, rate_default, limit_default)
         st.dataframe(drawdf_tbl, use_container_width=True, column_config=number_cols_config(drawdf_tbl, decimals=0))
+
 
