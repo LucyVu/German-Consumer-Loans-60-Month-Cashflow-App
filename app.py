@@ -85,7 +85,7 @@ sheet_name = st.sidebar.text_input("Excel sheet name", value="loan_tape")
 st.sidebar.header("PD in the tape")
 pd_unit_choice = st.sidebar.selectbox(
     "What unit are PD values in?",
-    ["Auto-detect", "Annual PD (we’ll convert to monthly)", "Monthly PD (already monthly)"],
+    ["Auto-detect", "Annual PD (convert to monthly)", "Monthly PD"],
     index=0,
     help=("Auto tries to infer annual vs monthly and whether PDs are in percent (e.g., 2) "
           "or proportion (e.g., 0.02). You can override here.")
@@ -717,3 +717,4 @@ with tab_tables:
             reinv_default, rate_default, limit_default = scenario_defaults_for_drawdown(scenario, opening_pool, months)
             drawdf_tbl = compute_drawdowns(port, reinv_default, rate_default, limit_default)
         st.dataframe(drawdf_tbl, use_container_width=True, column_config=number_cols_config(drawdf_tbl, decimals=0))
+
